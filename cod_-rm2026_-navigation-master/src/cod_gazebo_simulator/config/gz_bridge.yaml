@@ -1,0 +1,28 @@
+# Odometry (from Gazebo DiffDrive plugin → /model/cod_robot/odom)
+- ros_topic_name: "/Odometry"
+  gz_topic_name: "/model/cod_robot/odom"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "ignition.msgs.Odometry"
+  direction: "GZ_TO_ROS"
+
+# cmd_vel (ROS → Gazebo DiffDrive)
+- ros_topic_name: "/cmd_vel"
+  gz_topic_name: "/model/cod_robot/cmd_vel"
+  ros_type_name: "geometry_msgs/msg/Twist"
+  gz_type_name: "ignition.msgs.Twist"
+  direction: "ROS_TO_GZ"
+
+# LiDAR point cloud
+- ros_topic_name: "/livox/lidar"
+  gz_topic_name: "/world/default/model/cod_robot/link/livox_frame/sensor/front_mid360_lidar/scan/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "ignition.msgs.PointCloudPacked"
+  direction: "GZ_TO_ROS"
+
+# IMU data
+- ros_topic_name: "/livox/imu"
+  gz_topic_name: "/world/default/model/cod_robot/link/livox_frame/sensor/front_mid360_imu/imu"
+  ros_type_name: "sensor_msgs/msg/Imu"
+  gz_type_name: "ignition.msgs.IMU"
+  direction: "GZ_TO_ROS"
+

@@ -73,6 +73,7 @@ def setup_launch(context, *args, **kwargs):
     livox_tf = Node(
         package="tf2_ros", executable="static_transform_publisher",
         arguments=["--x", "0.0", "--y", "0.0", "--z", "0.15",
+                   "--roll", "0.0", "--pitch", "0.7854", "--yaw", "0.0",   # Pitch +45°: LiDAR前倾
                    "--frame-id", "base_link", "--child-frame-id", "livox_frame"],
     )
 

@@ -73,7 +73,7 @@
   <joint name="livox_frame_joint" type="fixed">
     <parent link="base_link"/>
     <child link="livox_frame"/>
-    <origin xyz="0.0 0.0 0.15" rpy="0 0 0"/>
+    <origin xyz="0.0 0.0 0.15" rpy="0 0.7854 0"/>   <!-- Pitch +45°: LiDAR前倾 -->
   </joint>
 
   <!-- ===== Gazebo 差速驱动插件 (sub cmd_vel → apply wheel velocity) ===== -->

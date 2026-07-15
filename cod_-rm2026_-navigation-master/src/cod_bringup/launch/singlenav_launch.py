@@ -41,9 +41,9 @@ def generate_launch_description():
                 parameters=[{
                     'input_topic': '/livox/lidar',
                     'output_topic': '/livox/lidar_filtered',
-                    'min_x': -0.2, 'max_x': 0.2,
-                    'min_y': -0.2, 'max_y': 0.4,
-                    'min_z': -0.1, 'max_z': 0.2,
+                    'min_x': -0.25, 'max_x': 0.4,
+                    'min_y': -0.25, 'max_y': 0.45,
+                    'min_z': -0.4, 'max_z': 0.25,
                     'negative': True,   # 挖掉车身
                     'leaf_size': 0.05   # 降采样
                 }]
@@ -98,7 +98,7 @@ def generate_launch_description():
                     "--y", "0.0",
                     "--z", "0.15",
                     "--roll", "0.0",
-                    "--pitch", "0.0",
+                    "--pitch", "0.7854",   # Pitch +45°: LiDAR前倾
                     "--yaw", "0.0",
                     "--frame-id", "base_link",
                     "--child-frame-id", "livox_frame",
@@ -125,24 +125,6 @@ def generate_launch_description():
                 ],
             ),
             # =================================================================
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(get_package_share_directory('realsense2_camera'), 'launch', 'rs_launch.py')
-                ),
-                launch_arguments={
-                    'depth_module.depth_profile': '424x240x90',    # 最高帧率
-                    #'enable_depth': 'true',
-                    #'enable_color': 'false',                        # 不需要彩色，节省USB带宽
-                    'pointcloud.enable': 'true',
-                    'pointcloud.ordered_pc': 'false',               # 无序点云，减少处理开销
-                    'pointcloud.allow_no_texture_points': 'true',   # 无彩色时必须开启
-                    'spatial_filter.enable': 'true',                # 空间滤波降噪
-                    'temporal_filter.enable': 'true',               # 时间滤波稳定深度
-                    'decimation_filter.enable': 'false',            # 不再降分辨率，已经很低
-                    'publish_tf': 'true',                           # 发布内部TF链
-                    'depth_module.enable_auto_exposure': 'true',
-                }.items()
-            ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','navigation_launch.py')),
                 launch_arguments={

@@ -34,7 +34,7 @@ def generate_launch_description():
             "--roll",
             "0.0",
             "--pitch",
-            "0.0",
+            "0.7854",   # Pitch +45°: LiDAR前倾
             "--yaw",
             "0.0",
             "--frame-id",

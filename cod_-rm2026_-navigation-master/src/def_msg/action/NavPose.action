@@ -1,0 +1,10 @@
+float32[] x
+float32[] y
+float32[] w
+int32 order   #航点数量
+---
+bool reached
+---
+float32 dis_x
+float32 dis_y
+float32 dis_w

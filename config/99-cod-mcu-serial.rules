@@ -1,0 +1,55 @@
+# ============================================================================
+# COD 哨兵导航系统 — MCU USB 虚拟串口 udev 规则
+# ============================================================================
+# 用途: 固定 USB CDC ACM 串口设备名，防止 USB 重枚举时 /dev/ttyACM0 → ttyACM1 漂移
+# 安装: sudo cp config/99-cod-mcu-serial.rules /etc/udev/rules.d/
+#        sudo udevadm control --reload-rules && sudo udevadm trigger
+# 验证: 插拔 MCU USB 后, ls -la /dev/cod_mcu 应指向正确的 ttyACM* 设备
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# 策略 A: 按 USB 物理端口路径匹配 (推荐，无需知道 VID/PID)
+# ---------------------------------------------------------------------------
+# 使用方法:
+#   1. 将 MCU 插入目标 USB 口
+#   2. 运行: udevadm info --name=/dev/ttyACM0 --attribute-walk | grep KERNELS
+#   3. 找到类似 "KERNELS=="1-1.2"" 的值，替换下面的 KERNELS 值
+#   4. 取消下面一行的注释，替换 <YOUR_KERNELS> 为实际值
+#
+# SUBSYSTEM=="tty", KERNELS=="<YOUR_KERNELS>", SYMLINK+="cod_mcu"
+
+# ---------------------------------------------------------------------------
+# 策略 B: 按 VID/PID 匹配 (需电控组提供 MCU 的 USB 设备 ID)
+# ---------------------------------------------------------------------------
+# 使用方法:
+#   1. 插上 MCU, 运行: lsusb
+#   2. 找到 MCU 设备行, 例如: "Bus 001 Device 005: ID 0483:5740 STMicroelectronics ..."
+#   3. idVendor=0483, idProduct=5740
+#   4. 取消下面一行的注释，替换 XXXX:YYYY 为实际值
+#
+# SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="YYYY", SYMLINK+="cod_mcu"
+
+# ---------------------------------------------------------------------------
+# 策略 C: 按 USB 设备序列号匹配 (如果 MCU 有唯一序列号)
+# ---------------------------------------------------------------------------
+# 使用方法:
+#   1. 运行: udevadm info --name=/dev/ttyACM0 --attribute-walk | grep serial
+#   2. 替换下面 ATTRS{serial} 的值
+#   3. 取消下面一行的注释
+#
+# SUBSYSTEM=="tty", ATTRS{serial}=="XXXXXXXXXXXX", SYMLINK+="cod_mcu"
+
+# ---------------------------------------------------------------------------
+# 通用: 给所有 ttyACM 设备加 dialout 组读写权限 (兜底, 一直生效)
+# ---------------------------------------------------------------------------
+# FIX12: 使用 0660 而非 0666 (世界可写是安全隐患)
+SUBSYSTEM=="tty", KERNEL=="ttyACM[0-9]*", GROUP="dialout", MODE="0660"
+
+# ============================================================================
+# 安装步骤:
+#   1. 选择一种匹配策略, 取消注释并填入实际值
+#   2. sudo cp config/99-cod-mcu-serial.rules /etc/udev/rules.d/
+#   3. sudo udevadm control --reload-rules
+#   4. sudo udevadm trigger
+#   5. 插拔 MCU USB, 然后: ls -la /dev/cod_mcu
+# ============================================================================

@@ -1,0 +1,49 @@
+# ROS2 / Colcon
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System
+.DS_Store
+Thumbs.db
+
+# ROS bags / logs
+*.bag
+*.db3
+bags/
+logs/
+
+# Large binary files
+*.pcd
+*.stl
+
+# Environment
+.env
+*.env.local
+
+# Composer / Claude
+.composer/
+.claude/
+
+# Data (images, recordings)
+data/
+
+# Backup
+*~
+*.bak
+
+# Temp
+tmp/
+*.tmp

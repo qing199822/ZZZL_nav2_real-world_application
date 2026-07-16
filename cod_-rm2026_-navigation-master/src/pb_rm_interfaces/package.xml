@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pb_rm_interfaces</name>
+  <version>0.0.0</version>
+  <description>Custom message interfaces for RoboMaster Referee System</description>
+  <maintainer email="user@todo.todo">user</maintainer>
+  <license>Apache-2.0</license>
+
+  <!-- 编译工具 -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- 消息生成器依赖 -->
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <!-- 运行时的消息基础依赖 -->
+  <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <!-- 因为 RobotStatus.msg 用到了 geometry_msgs/Pose，所以需要依赖 geometry_msgs -->
+  <depend>geometry_msgs</depend>
+  
+
+  <!-- 声明这是一个接口包 -->
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

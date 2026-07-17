@@ -61,6 +61,9 @@ public:
       "nav2_core", "nav2_core::Controller");
     inner_controller_ = loader_->createUniqueInstance(inner_plugin_type);
     inner_controller_->configure(parent, name, tf, costmap_ros);
+    tf_ = tf;
+    costmap_ros_ = costmap_ros;
+    clock_ = node->get_clock();
 
     RCLCPP_INFO(
       logger_,
@@ -100,22 +103,37 @@ public:
   {
     auto cmd = inner_controller_->computeVelocityCommands(pose, velocity, goal_checker);
 
-    // 计算到目标的距离
-    double dx = goal_.pose.position.x - pose.pose.position.x;
-    double dy = goal_.pose.position.y - pose.pose.position.y;
-    double dist = std::hypot(dx, dy);
+    // 将目标点通过 TF 变换到 base_frame
+    geometry_msgs::msg::PoseStamped goal_in_base;
+    double dist;
+    if (tf_ && !goal_.header.frame_id.empty()) {
+      try {
+        goal_in_base = tf_->transform(
+          goal_, costmap_ros_->getBaseFrameID(), tf2::durationFromSec(0.1));
+        dist = std::hypot(goal_in_base.pose.position.x, goal_in_base.pose.position.y);
+      } catch (const tf2::TransformException & ex) {
+        RCLCPP_WARN_THROTTLE(logger_, *clock_, 1000,
+          "TF failed: %s. Skipping approach control.", ex.what());
+        return cmd;
+      }
+    } else {
+      RCLCPP_WARN_THROTTLE(logger_, *clock_, 1000,
+        "TF unavailable. Skipping approach control.");
+      return cmd;
+    }
 
     if (dist < direct_approach_distance_) {
       // 近距离直接驱动模式：绕过 MPPI 的弧线输出，直接朝目标点走
       double target_speed = std::min(approach_velocity_, dist * direct_approach_kp_);
       if (dist > 0.01) {
-        cmd.twist.linear.x = target_speed * (dx / dist);
-        cmd.twist.linear.y = target_speed * (dy / dist);
+        cmd.twist.linear.x = target_speed * (goal_in_base.pose.position.x / dist);
+        cmd.twist.linear.y = target_speed * (goal_in_base.pose.position.y / dist);
       } else {
         cmd.twist.linear.x = 0.0;
         cmd.twist.linear.y = 0.0;
       }
-      cmd.twist.angular.z = 0.0;
+      // 删除: cmd.twist.angular.z = 0.0;
+      // 保留内部控制器输出的 angular.z（goal checker 可能需要最终 yaw 对齐）
     } else if (dist < approach_distance_) {
       double speed = std::hypot(cmd.twist.linear.x, cmd.twist.linear.y);
       if (speed > approach_velocity_) {
@@ -125,6 +143,15 @@ public:
         // 角速度也按比例降低，避免原地打转
         cmd.twist.angular.z *= scale;
       }
+    }
+
+    // 新增 NaN/Inf 保护
+    if (!std::isfinite(cmd.twist.linear.x) || !std::isfinite(cmd.twist.linear.y) ||
+        !std::isfinite(cmd.twist.angular.z)) {
+      RCLCPP_ERROR(logger_, "NaN/Inf detected in velocity commands. Zeroing out.");
+      cmd.twist.linear.x = 0.0;
+      cmd.twist.linear.y = 0.0;
+      cmd.twist.angular.z = 0.0;
     }
 
     return cmd;
@@ -144,6 +171,9 @@ private:
   double approach_velocity_{0.5};
   double direct_approach_distance_{0.5};
   double direct_approach_kp_{1.0};
+  std::shared_ptr<tf2_ros::Buffer> tf_;
+  std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros_;
+  rclcpp::Clock::SharedPtr clock_;
 };
 
 }  // namespace goal_approach_controller

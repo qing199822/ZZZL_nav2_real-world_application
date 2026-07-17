@@ -24,12 +24,24 @@ public:
   // dt -  loop interval time
   // max - maximum value of manipulated variable
   // min - minimum value of manipulated variable
-  PID(double dt, double max, double min, double kp, double kd, double ki);
+  // integral_min - minimum value for integral term (default -1.0)
+  // integral_max - maximum value for integral term (default 1.0)
+  PID(double dt, double max, double min, double kp, double kd, double ki,
+      double integral_min = -1.0, double integral_max = 1.0);
 
   // Returns the manipulated variable given a set_point and current process value
   double calculate(double set_point, double pv);
   void setSumError(double sum_error);
   ~PID();
+
+  // Reset controller state
+  void reset();
+
+  // Set PID gains
+  void setGains(double kp, double ki, double kd);
+
+  // Get current integral value
+  double getIntegral() const;
 
 private:
   double dt_;
@@ -40,6 +52,9 @@ private:
   double ki_;
   double pre_error_;
   double integral_;
+  double integral_min_;
+  double integral_max_;
+  bool initialized_;
 };
 
 #endif  // PB_OMNI_PID_PURSUIT_CONTROLLER__PID_HPP_

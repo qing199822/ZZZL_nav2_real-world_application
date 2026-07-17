@@ -19,6 +19,8 @@ private:
 
   void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
 
+  void watchdogCallback();
+
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
 
@@ -35,6 +37,11 @@ private:
   float spin_speed_;
 
   double current_robot_base_angle_;
+
+  rclcpp::TimerBase::SharedPtr watchdog_timer_;
+  double cmd_vel_timeout_{0.5};
+  rclcpp::Time last_cmd_time_;
+  bool enable_vel_rotation_{false};
 };
 
 }  // namespace fake_vel_transform

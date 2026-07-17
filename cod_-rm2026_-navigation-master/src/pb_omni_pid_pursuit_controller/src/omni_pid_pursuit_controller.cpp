@@ -14,6 +14,8 @@
 
 #include "pb_omni_pid_pursuit_controller/omni_pid_pursuit_controller.hpp"
 
+#include <cmath>  // 新增：用于 std::isfinite
+
 #include "nav2_core/exceptions.hpp"
 #include "nav2_util/geometry_utils.hpp"
 #include "nav2_util/node_utils.hpp"
@@ -255,8 +257,11 @@ geometry_msgs::msg::TwistStamped OmniPidPursuitController::computeVelocityComman
   // Transform local frame to global frame to use in collision checking
   nav_msgs::msg::Path costmap_frame_local_plan;
 
-  int sample_points = 10;
+  // 新版：基于 costmap 分辨率密集采样，最少 20 点
   int plan_size = transformed_plan.poses.size();
+  const double costmap_res = costmap->getResolution();
+  int sample_points = std::max(20, static_cast<int>(plan_size / std::max(costmap_res, 0.01)));
+  sample_points = std::min(sample_points, plan_size);
   for (int i = 0; i < sample_points; ++i) {
     int index = std::min((i * plan_size) / sample_points, plan_size - 1);
     geometry_msgs::msg::PoseStamped map_pose;
@@ -272,6 +277,16 @@ geometry_msgs::msg::TwistStamped OmniPidPursuitController::computeVelocityComman
     cmd_vel.twist.angular.z = angular_vel;
   } else {
     throw nav2_core::PlannerException("Collision detected in the trajectory. Stopping the robot!");
+  }
+
+  // 新增 NaN/Inf 保护（任务 5）
+  if (!std::isfinite(cmd_vel.twist.linear.x) || !std::isfinite(cmd_vel.twist.linear.y) ||
+      !std::isfinite(cmd_vel.twist.angular.z)) {
+    RCLCPP_WARN_THROTTLE(logger_, *clock_, 1000, "NaN or Inf in velocity commands. Zeroing out.");
+    cmd_vel.twist.linear.x = 0.0;
+    cmd_vel.twist.linear.y = 0.0;
+    cmd_vel.twist.angular.z = 0.0;
+    throw nav2_core::PlannerException("NaN or Inf detected in computed velocity commands");
   }
 
   return cmd_vel;
@@ -458,12 +473,19 @@ bool OmniPidPursuitController::isCollisionDetected(const nav_msgs::msg::Path & p
       if (costmap->getCost(mx, my) >= nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE) {
         return true;
       }
+      // 新增：NO_INFORMATION 也视为不安全
+      if (costmap->getCost(mx, my) == nav2_costmap_2d::NO_INFORMATION) {
+        RCLCPP_WARN_THROTTLE(
+          logger_, *clock_, 1000,
+          "Path point in unknown costmap area. Collision risk.");
+        return true;
+      }
     } else {
-      // RCLCPP_WARN(
-      //   logger_,
-      //   "The Local path is not in the costmap. Cannot check for collisions. "
-      //   "Proceed at your own risk, slow the robot, or increase your costmap size.");
-      return false;
+      // 越界 → 视为碰撞风险
+      RCLCPP_WARN_THROTTLE(
+        logger_, *clock_, 1000,
+        "Path point outside costmap bounds. Treating as collision risk.");
+      return true;  // ← 保守：越界 = 不安全
     }
   }
   return false;
@@ -755,6 +777,15 @@ rcl_interfaces::msg::SetParametersResult OmniPidPursuitController::dynamicParame
     }
   }
   result.successful = true;
+
+  // 任务 6: 新增 PID 增益同步
+  if (move_pid_) {
+    move_pid_->setGains(translation_kp_, translation_ki_, translation_kd_);
+  }
+  if (heading_pid_) {
+    heading_pid_->setGains(rotation_kp_, rotation_ki_, rotation_kd_);
+  }
+
   return result;
 }
 

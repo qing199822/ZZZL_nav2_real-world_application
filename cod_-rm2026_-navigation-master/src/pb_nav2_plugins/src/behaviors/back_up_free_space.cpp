@@ -95,11 +95,6 @@ nav2_behaviors::Status BackUpFreeSpace::onRun(
 
   end_time_ = clock_->now() + command_time_allowance_;
 
-  if (!nav2_util::getCurrentPose(
-        initial_pose_, *tf_, global_frame_, robot_base_frame_, transform_tolerance_)) {
-    RCLCPP_ERROR(logger_, "Initial robot pose is not available.");
-    return nav2_behaviors::Status::FAILED;
-  }
   RCLCPP_WARN(
     logger_, "backing up %f meters towards free space at angle %f", command_x_, best_angle);
 

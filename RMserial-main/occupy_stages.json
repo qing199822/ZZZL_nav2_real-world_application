@@ -1,0 +1,22 @@
+{
+    "stages": [
+        {
+            "vx": 0.0,
+            "vy": -0.5,
+            "monitor_axis": "y",
+            "target_delta": -3.0
+        },
+        {
+            "vx": 0.5,
+            "vy": 0.0,
+            "monitor_axis": "x",
+            "target_delta": 3.5
+        },
+        {
+            "vx": 0.0,
+            "vy": 0.5,
+            "monitor_axis": "y",
+            "target_delta": 3.0
+        }
+    ]
+}

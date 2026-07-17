@@ -1,0 +1,7 @@
+#用于云台模式的设置与变更
+std_msgs/Header header
+int32 mode
+---
+bool result
+int32 loop_times
+

@@ -1,0 +1,27 @@
+# ROS2 / Colcon
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System
+.DS_Store
+Thumbs.db
+
+# Claude
+.claude/
+
+# Temp files
+/tmp/
+*.log

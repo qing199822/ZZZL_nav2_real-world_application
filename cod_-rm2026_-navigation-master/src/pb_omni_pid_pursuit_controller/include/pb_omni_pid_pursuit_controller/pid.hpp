@@ -18,30 +18,34 @@
 class PID
 {
 public:
-  // kp -  proportional gain
-  // ki -  Integral gain
-  // kd -  derivative gain
-  // dt -  loop interval time
+  // dt  - loop interval time (seconds)
   // max - maximum value of manipulated variable
   // min - minimum value of manipulated variable
-  // integral_min - minimum value for integral term (default -1.0)
-  // integral_max - maximum value for integral term (default 1.0)
-  PID(double dt, double max, double min, double kp, double kd, double ki,
-      double integral_min = -1.0, double integral_max = 1.0);
+  // kp  - proportional gain
+  // ki  - integral gain
+  // kd  - derivative gain
+  // integral_min - minimum value of integral term (anti-windup)
+  // integral_max - maximum value of integral term (anti-windup)
+  PID(
+    double dt, double max, double min, double kp, double kd, double ki,
+    double integral_min = -1.0, double integral_max = 1.0);
 
   // Returns the manipulated variable given a set_point and current process value
   double calculate(double set_point, double pv);
-  void setSumError(double sum_error);
-  ~PID();
 
-  // Reset controller state
+  // Reset integral, previous error, and initialization flag
   void reset();
 
-  // Set PID gains
+  // Thread-safe update of PID gains (kp, ki, kd)
   void setGains(double kp, double ki, double kd);
 
-  // Get current integral value
-  double getIntegral() const;
+  // Set the integral term externally (e.g. for anti-windup from outside)
+  void setSumError(double sum_error);
+
+  // Get current integral value for debugging
+  double getIntegral() const { return integral_; }
+
+  ~PID();
 
 private:
   double dt_;
@@ -54,7 +58,7 @@ private:
   double integral_;
   double integral_min_;
   double integral_max_;
-  bool initialized_;
+  bool initialized_{false};
 };
 
 #endif  // PB_OMNI_PID_PURSUIT_CONTROLLER__PID_HPP_

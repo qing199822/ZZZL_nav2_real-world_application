@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "pb_omni_pid_pursuit_controller/omni_pid_pursuit_controller.hpp"
+#include <cmath>
 
-#include <cmath>  // 新增：用于 std::isfinite
+#include "pb_omni_pid_pursuit_controller/omni_pid_pursuit_controller.hpp"
 
 #include "nav2_core/exceptions.hpp"
 #include "nav2_util/geometry_utils.hpp"
@@ -257,13 +257,13 @@ geometry_msgs::msg::TwistStamped OmniPidPursuitController::computeVelocityComman
   // Transform local frame to global frame to use in collision checking
   nav_msgs::msg::Path costmap_frame_local_plan;
 
-  // 新版：基于 costmap 分辨率密集采样，最少 20 点
-  int plan_size = transformed_plan.poses.size();
+  // Dense sampling: at least 20 points, spacing no larger than costmap resolution
   const double costmap_res = costmap->getResolution();
+  int plan_size = transformed_plan.poses.size();
   int sample_points = std::max(20, static_cast<int>(plan_size / std::max(costmap_res, 0.01)));
   sample_points = std::min(sample_points, plan_size);
   for (int i = 0; i < sample_points; ++i) {
-    int index = std::min((i * plan_size) / sample_points, plan_size - 1);
+    int index = std::min((i * plan_size) / std::max(sample_points, 1), plan_size - 1);
     geometry_msgs::msg::PoseStamped map_pose;
     transformPose(costmap_ros_->getGlobalFrameID(), transformed_plan.poses[index], map_pose);
     costmap_frame_local_plan.poses.push_back(map_pose);
@@ -276,17 +276,16 @@ geometry_msgs::msg::TwistStamped OmniPidPursuitController::computeVelocityComman
     cmd_vel.twist.linear.y = lin_vel * sin(theta_dist);
     cmd_vel.twist.angular.z = angular_vel;
   } else {
-    throw nav2_core::PlannerException("Collision detected in the trajectory. Stopping the robot!");
+    throw std::runtime_error("Collision detected in the trajectory. Stopping the robot!");
   }
-
-  // 新增 NaN/Inf 保护（任务 5）
-  if (!std::isfinite(cmd_vel.twist.linear.x) || !std::isfinite(cmd_vel.twist.linear.y) ||
+  // Safety: reject NaN/Inf velocity commands
+  if (!std::isfinite(cmd_vel.twist.linear.x) ||
+      !std::isfinite(cmd_vel.twist.linear.y) ||
       !std::isfinite(cmd_vel.twist.angular.z)) {
-    RCLCPP_WARN_THROTTLE(logger_, *clock_, 1000, "NaN or Inf in velocity commands. Zeroing out.");
+    RCLCPP_ERROR(logger_, "NaN/Inf detected in velocity command. Publishing zero velocity.");
     cmd_vel.twist.linear.x = 0.0;
     cmd_vel.twist.linear.y = 0.0;
     cmd_vel.twist.angular.z = 0.0;
-    throw nav2_core::PlannerException("NaN or Inf detected in computed velocity commands");
   }
 
   return cmd_vel;
@@ -304,13 +303,13 @@ nav_msgs::msg::Path OmniPidPursuitController::transformGlobalPlan(
   const geometry_msgs::msg::PoseStamped & pose)
 {
   if (global_plan_.poses.empty()) {
-    throw nav2_core::PlannerException("Received plan with zero length");
+    throw std::runtime_error("Received plan with zero length");
   }
 
   // let's get the pose of the robot in the frame of the plan
   geometry_msgs::msg::PoseStamped robot_pose;
   if (!transformPose(global_plan_.header.frame_id, pose, robot_pose)) {
-    throw nav2_core::PlannerException("Unable to transform robot pose into global plan's frame");
+    throw std::runtime_error("Unable to transform robot pose into global plan's frame");
   }
 
   // We'll discard points on the plan that are outside the local costmap
@@ -358,7 +357,7 @@ nav_msgs::msg::Path OmniPidPursuitController::transformGlobalPlan(
   local_path_pub_->publish(transformed_plan);
 
   if (transformed_plan.poses.empty()) {
-    throw nav2_core::PlannerException("Resulting plan has 0 poses in it.");
+    throw std::runtime_error("Resulting plan has 0 poses in it.");
   }
 
   return transformed_plan;
@@ -466,26 +465,31 @@ bool OmniPidPursuitController::transformPose(
 bool OmniPidPursuitController::isCollisionDetected(const nav_msgs::msg::Path & path)
 {
   auto costmap = costmap_ros_->getCostmap();
+  const double resolution = costmap->getResolution();
+
   for (const auto & pose_stamped : path.poses) {
     const auto & pose = pose_stamped.pose;
     unsigned int mx, my;
-    if (costmap->worldToMap(pose.position.x, pose.position.y, mx, my)) {
-      if (costmap->getCost(mx, my) >= nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE) {
-        return true;
-      }
-      // 新增：NO_INFORMATION 也视为不安全
-      if (costmap->getCost(mx, my) == nav2_costmap_2d::NO_INFORMATION) {
-        RCLCPP_WARN_THROTTLE(
-          logger_, *clock_, 1000,
-          "Path point in unknown costmap area. Collision risk.");
-        return true;
-      }
-    } else {
-      // 越界 → 视为碰撞风险
+    if (!costmap->worldToMap(pose.position.x, pose.position.y, mx, my)) {
+      // Path point outside costmap: treat as UNSAFE (fail-safe)
       RCLCPP_WARN_THROTTLE(
         logger_, *clock_, 1000,
-        "Path point outside costmap bounds. Treating as collision risk.");
-      return true;  // ← 保守：越界 = 不安全
+        "Path point (%.2f, %.2f) outside costmap bounds. Treating as collision risk.",
+        pose.position.x, pose.position.y);
+      return true;
+    }
+
+    unsigned char cost = costmap->getCost(mx, my);
+    if (cost >= nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE) {
+      return true;
+    }
+    // Also treat NO_INFORMATION as unsafe
+    if (cost == nav2_costmap_2d::NO_INFORMATION) {
+      RCLCPP_WARN_THROTTLE(
+        logger_, *clock_, 1000,
+        "Path point (%.2f, %.2f) in unknown costmap area. Collision risk.",
+        pose.position.x, pose.position.y);
+      return true;
     }
   }
   return false;
@@ -776,9 +780,8 @@ rcl_interfaces::msg::SetParametersResult OmniPidPursuitController::dynamicParame
       }
     }
   }
-  result.successful = true;
 
-  // 任务 6: 新增 PID 增益同步
+  // Sync updated gains to actual PID objects
   if (move_pid_) {
     move_pid_->setGains(translation_kp_, translation_ki_, translation_kd_);
   }
@@ -786,6 +789,7 @@ rcl_interfaces::msg::SetParametersResult OmniPidPursuitController::dynamicParame
     heading_pid_->setGains(rotation_kp_, rotation_ki_, rotation_kd_);
   }
 
+  result.successful = true;
   return result;
 }
 

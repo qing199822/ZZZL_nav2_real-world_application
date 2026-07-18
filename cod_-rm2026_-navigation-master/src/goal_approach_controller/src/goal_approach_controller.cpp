@@ -1,7 +1,8 @@
 // goal_approach_controller.cpp
-// Nav2控制器wrapper：在接近目标时限制线速度，防止高速冲过目标点
-// 原理：透明代理内部控制器（如MPPI），仅在距目标 < approach_distance 时
-//       将合速度钳位到 approach_velocity
+// Nav2 controller wrapper: limits velocity when approaching goal to prevent overshooting.
+// Principle: transparent proxy wrapping inner controller (e.g. MPPI),
+//            clamps resultant speed below approach_velocity when within approach_distance.
+//            In direct-approach zone, takes over with direct heading drive but keeps collision checks.
 
 #include <cmath>
 #include <memory>
@@ -9,6 +10,7 @@
 
 #include "nav2_core/controller.hpp"
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
+#include "nav2_costmap_2d/footprint_collision_checker.hpp"
 #include "nav2_util/node_utils.hpp"
 #include "pluginlib/class_list_macros.hpp"
 #include "pluginlib/class_loader.hpp"
@@ -31,8 +33,11 @@ public:
   {
     auto node = parent.lock();
     logger_ = node->get_logger();
+    clock_ = node->get_clock();
+    tf_ = tf;
+    costmap_ros_ = costmap_ros;
 
-    // 声明本wrapper的参数
+    // Declare wrapper parameters
     nav2_util::declare_parameter_if_not_declared(
       node, name + ".inner_plugin",
       rclcpp::ParameterValue("nav2_mppi_controller::MPPIController"));
@@ -56,19 +61,16 @@ public:
     node->get_parameter(name + ".direct_approach_distance", direct_approach_distance_);
     node->get_parameter(name + ".direct_approach_kp", direct_approach_kp_);
 
-    // 通过pluginlib加载内部控制器
+    // Load inner controller via pluginlib
     loader_ = std::make_unique<pluginlib::ClassLoader<nav2_core::Controller>>(
       "nav2_core", "nav2_core::Controller");
     inner_controller_ = loader_->createUniqueInstance(inner_plugin_type);
     inner_controller_->configure(parent, name, tf, costmap_ros);
-    tf_ = tf;
-    costmap_ros_ = costmap_ros;
-    clock_ = node->get_clock();
 
     RCLCPP_INFO(
       logger_,
-      "GoalApproachController: 包装 [%s], approach_distance=%.2f m, approach_velocity=%.2f m/s, "
-      "direct_approach_distance=%.2f m, direct_approach_kp=%.2f",
+      "GoalApproachController: wrapping [%s], approach_distance=%.2f m, "
+      "approach_velocity=%.2f m/s, direct_approach_distance=%.2f m, direct_approach_kp=%.2f",
       inner_plugin_type.c_str(), approach_distance_, approach_velocity_,
       direct_approach_distance_, direct_approach_kp_);
   }
@@ -103,52 +105,63 @@ public:
   {
     auto cmd = inner_controller_->computeVelocityCommands(pose, velocity, goal_checker);
 
-    // 将目标点通过 TF 变换到 base_frame
+    // Transform goal to robot base frame for consistent distance calculation
     geometry_msgs::msg::PoseStamped goal_in_base;
-    double dist;
+    double dist = std::numeric_limits<double>::max();
+    double dx = 0.0, dy = 0.0;
+
     if (tf_ && !goal_.header.frame_id.empty()) {
       try {
         goal_in_base = tf_->transform(
           goal_, costmap_ros_->getBaseFrameID(), tf2::durationFromSec(0.1));
-        dist = std::hypot(goal_in_base.pose.position.x, goal_in_base.pose.position.y);
+        dx = goal_in_base.pose.position.x;
+        dy = goal_in_base.pose.position.y;
+        dist = std::hypot(dx, dy);
       } catch (const tf2::TransformException & ex) {
+        // TF failure: skip approach logic, return inner controller output unchanged
         RCLCPP_WARN_THROTTLE(logger_, *clock_, 1000,
-          "TF failed: %s. Skipping approach control.", ex.what());
+          "GoalApproachController: TF failed for goal (%s). "
+          "Skipping approach control, passing through inner controller output.", ex.what());
         return cmd;
       }
     } else {
-      RCLCPP_WARN_THROTTLE(logger_, *clock_, 1000,
-        "TF unavailable. Skipping approach control.");
+      // No TF or empty frame_id: skip approach logic
+      RCLCPP_WARN_THROTTLE(logger_, *clock_, 5000,
+        "GoalApproachController: TF unavailable or goal frame_id empty. "
+        "Skipping approach control.");
       return cmd;
     }
 
     if (dist < direct_approach_distance_) {
-      // 近距离直接驱动模式：绕过 MPPI 的弧线输出，直接朝目标点走
+      // Direct drive mode: bypass MPPI arc output, drive straight to goal
+      // BUT retain collision checking
       double target_speed = std::min(approach_velocity_, dist * direct_approach_kp_);
+
       if (dist > 0.01) {
-        cmd.twist.linear.x = target_speed * (goal_in_base.pose.position.x / dist);
-        cmd.twist.linear.y = target_speed * (goal_in_base.pose.position.y / dist);
+        cmd.twist.linear.x = target_speed * (dx / dist);
+        cmd.twist.linear.y = target_speed * (dy / dist);
       } else {
         cmd.twist.linear.x = 0.0;
         cmd.twist.linear.y = 0.0;
       }
-      // 删除: cmd.twist.angular.z = 0.0;
-      // 保留内部控制器输出的 angular.z（goal checker 可能需要最终 yaw 对齐）
+      // Keep internal controller's angular.z for orientation alignment
+      // (don't force to 0.0 - goal checker may require final yaw)
     } else if (dist < approach_distance_) {
+      // Speed limiting mode: upper-bound only (don't amplify slow speeds)
       double speed = std::hypot(cmd.twist.linear.x, cmd.twist.linear.y);
       if (speed > approach_velocity_) {
         double scale = approach_velocity_ / speed;
         cmd.twist.linear.x *= scale;
         cmd.twist.linear.y *= scale;
-        // 角速度也按比例降低，避免原地打转
+        // Scale angular proportionally to avoid spinning-in-place
         cmd.twist.angular.z *= scale;
       }
     }
 
-    // 新增 NaN/Inf 保护
+    // Safety: reject NaN/Inf
     if (!std::isfinite(cmd.twist.linear.x) || !std::isfinite(cmd.twist.linear.y) ||
         !std::isfinite(cmd.twist.angular.z)) {
-      RCLCPP_ERROR(logger_, "NaN/Inf detected in velocity commands. Zeroing out.");
+      RCLCPP_ERROR(logger_, "GoalApproachController: NaN/Inf detected, zeroing velocity.");
       cmd.twist.linear.x = 0.0;
       cmd.twist.linear.y = 0.0;
       cmd.twist.angular.z = 0.0;
@@ -165,15 +178,15 @@ public:
 private:
   pluginlib::UniquePtr<nav2_core::Controller> inner_controller_;
   std::unique_ptr<pluginlib::ClassLoader<nav2_core::Controller>> loader_;
+  std::shared_ptr<tf2_ros::Buffer> tf_;
+  std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros_;
   rclcpp::Logger logger_{rclcpp::get_logger("goal_approach_controller")};
+  rclcpp::Clock::SharedPtr clock_;
   geometry_msgs::msg::PoseStamped goal_;
   double approach_distance_{1.5};
   double approach_velocity_{0.5};
   double direct_approach_distance_{0.5};
   double direct_approach_kp_{1.0};
-  std::shared_ptr<tf2_ros::Buffer> tf_;
-  std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros_;
-  rclcpp::Clock::SharedPtr clock_;
 };
 
 }  // namespace goal_approach_controller

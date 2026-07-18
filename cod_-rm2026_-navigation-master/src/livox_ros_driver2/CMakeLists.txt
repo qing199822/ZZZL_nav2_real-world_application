@@ -175,12 +175,8 @@ if(ROS_EDITION STREQUAL "ROS1")
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
   )
 
-  install(DIRECTORY launch_ROS2/
-    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
-  )
-
-  install(DIRECTORY config/
-    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config
+  install(DIRECTORY launch_ROS1/
+    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch_ROS1
   )
 
   #---------------------------------------------------------------------------------------
@@ -286,7 +282,6 @@ else(ROS_EDITION STREQUAL "ROS2")
   target_include_directories(${PROJECT_NAME} PRIVATE ${livox_sdk_INCLUDE_DIRS})
 
   # get include directories of custom msg headers
-  set(LIVOX_INTERFACES_INCLUDE_DIRECTORIES "")
   if(DISTRO_ROS STREQUAL "humble" OR DISTRO_ROS STREQUAL "jazzy")
     rosidl_get_typesupport_target(cpp_typesupport_target
     ${LIVOX_INTERFACES} "rosidl_typesupport_cpp")
@@ -297,11 +292,12 @@ else(ROS_EDITION STREQUAL "ROS2")
     get_target_property(LIVOX_INTERFACES_INCLUDE_DIRECTORIES ${LIVOX_INTERFACE_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
   endif()
 
-  # include file directory
+  # include file direcotry
   target_include_directories(${PROJECT_NAME} PUBLIC
     ${PCL_INCLUDE_DIRS}
     ${APR_INCLUDE_DIRS}
     ${LIVOX_LIDAR_SDK_INCLUDE_DIR}
+    ${LIVOX_INTERFACES_INCLUDE_DIRECTORIES}   # for custom msgs
     3rdparty
     src
   )

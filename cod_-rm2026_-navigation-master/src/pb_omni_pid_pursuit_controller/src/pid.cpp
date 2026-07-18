@@ -13,16 +13,25 @@
 // limitations under the License.
 
 #include "pb_omni_pid_pursuit_controller/pid.hpp"
+
+#include <algorithm>
 #include <cmath>
-#include <algorithm>  // for std::clamp
 #include <stdexcept>
 
-PID::PID(double dt, double max, double min, double kp, double kd, double ki, double integral_min, double integral_max)
-: dt_(dt), max_(max), min_(min), kp_(kp), kd_(kd), ki_(ki),
-  integral_min_(integral_min), integral_max_(integral_max),
-  pre_error_(0), integral_(0), initialized_(false)
+PID::PID(
+  double dt, double max, double min, double kp, double kd, double ki,
+  double integral_min, double integral_max)
+: dt_(dt),
+  max_(max),
+  min_(min),
+  kp_(kp),
+  kd_(kd),
+  ki_(ki),
+  pre_error_(0),
+  integral_(0),
+  integral_min_(integral_min),
+  integral_max_(integral_max)
 {
-  // Parameter validation
   if (!std::isfinite(dt_) || dt_ <= 0.0) {
     throw std::invalid_argument("PID: dt must be positive and finite");
   }
@@ -36,7 +45,7 @@ PID::PID(double dt, double max, double min, double kp, double kd, double ki, dou
 
 double PID::calculate(double set_point, double pv)
 {
-  // Input validation
+  // Reject NaN/Inf inputs
   if (!std::isfinite(set_point) || !std::isfinite(pv)) {
     return 0.0;
   }
@@ -44,58 +53,58 @@ double PID::calculate(double set_point, double pv)
   // Calculate error
   double error = set_point - pv;
 
-  // Proportional term
-  double p_out = kp_ * error;
-
-  // Integral term
-  integral_ += error * dt_;
-  integral_ = std::clamp(integral_, integral_min_, integral_max_);  // First clamp
-  double i_out = ki_ * integral_;  // Then calculate output
-
-  // Derivative term with anti-windup
-  double derivative = 0.0;
-  double d_out = 0.0;
+  // Handle first call: avoid derivative kick
   if (!initialized_) {
     pre_error_ = error;
     initialized_ = true;
-  } else {
-    derivative = (error - pre_error_) / dt_;
+  }
+
+  // Proportional term
+  double p_out = kp_ * error;
+
+  // Integral term with anti-windup clamping (clamp BEFORE computing output)
+  integral_ += error * dt_;
+  integral_ = std::clamp(integral_, integral_min_, integral_max_);
+  double i_out = ki_ * integral_;
+
+  // Derivative term (skip on first call)
+  double d_out = 0.0;
+  if (initialized_) {
+    double derivative = (error - pre_error_) / dt_;
     d_out = kd_ * derivative;
   }
 
   // Calculate total output
   double output = p_out + i_out + d_out;
 
-  // Restrict to max/min
-  output = std::clamp(output, min_, max_);
-
-  // Save error to previous error
-  pre_error_ = error;
-
-  // Output validation
+  // Reject NaN/Inf output
   if (!std::isfinite(output)) {
     output = 0.0;
   }
 
+  // Restrict to max/min
+  output = std::clamp(output, min_, max_);
+
+  // Save error for next derivative calculation
+  pre_error_ = error;
+
   return output;
 }
 
-void PID::setSumError(double sum_error) { integral_ = sum_error; }
-
-void PID::reset() {
+void PID::reset()
+{
   integral_ = 0.0;
   pre_error_ = 0.0;
   initialized_ = false;
 }
 
-void PID::setGains(double kp, double ki, double kd) {
+void PID::setGains(double kp, double ki, double kd)
+{
   kp_ = kp;
   ki_ = ki;
   kd_ = kd;
 }
 
-double PID::getIntegral() const {
-  return integral_;
-}
+void PID::setSumError(double sum_error) { integral_ = sum_error; }
 
 PID::~PID() {}

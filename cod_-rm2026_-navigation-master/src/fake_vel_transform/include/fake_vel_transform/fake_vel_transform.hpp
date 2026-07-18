@@ -16,15 +16,13 @@ public:
 
 private:
   void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
-
   void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
-
   void watchdogCallback();
 
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_chassis_pub_;
+  rclcpp::TimerBase::SharedPtr watchdog_timer_;
 
   // Broadcast tf from robot_base to robot_base_fake
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
@@ -37,11 +35,9 @@ private:
   float spin_speed_;
 
   double current_robot_base_angle_;
-
-  rclcpp::TimerBase::SharedPtr watchdog_timer_;
   double cmd_vel_timeout_{0.5};
+  bool enable_vel_rotation_{true};
   rclcpp::Time last_cmd_time_;
-  bool enable_vel_rotation_{false};
 };
 
 }  // namespace fake_vel_transform

@@ -25,7 +25,7 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
-add_executable(cod_serial src/cod_serial.cpp src/uart_transporter.cpp)
+add_executable(cod_serial src/cod_serial.cpp)
 install(TARGETS
   cod_serial
   DESTINATION lib/${PROJECT_NAME})

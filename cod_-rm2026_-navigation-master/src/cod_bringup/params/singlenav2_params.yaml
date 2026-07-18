@@ -64,7 +64,8 @@ controller_server:
   ros__parameters:
     publish_critics_stats: True
     use_sim_time: False
-    controller_frequency: 30.0  # Reduced from 50Hz to give MPPI more compute time per cycle
+    controller_frequency: 50.0  # 匹配 model_dt: 0.02 对应的 50Hz
+    robot_base_frame: base_link  # 首测使用真实机身坐标系
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.001
     min_theta_velocity_threshold: 0.001
@@ -266,13 +267,13 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
-      width: 25
-      height: 25
+      width: 100
+      height: 100
       update_frequency: 20.0
       publish_frequency: 20.0
       global_frame: map
-      robot_base_frame: base_link
-      rolling_window: true
+      robot_base_frame: base_link  # 首测使用真实机身坐标系
+      rolling_window: false
       use_sim_time: False
       robot_radius: 0.1
       footprint: "[ [0.1, 0.1], [0.1, -0.1], [-0.1, -0.1], [-0.1, 0.1] ]"
@@ -470,7 +471,7 @@ waypoint_follower:
 
 velocity_smoother:
   ros__parameters:
-    smoothing_frequency: 30.0  # Matches controller_frequency for consistent timing
+    smoothing_frequency: 50.0  # 与 controller_frequency 一致
     scale_velocities: False
     feedback: "OPEN_LOOP"
     max_velocity: [2.5, 2.5, 2.5] #与 MPPI 限速一致，不再截断高速输出

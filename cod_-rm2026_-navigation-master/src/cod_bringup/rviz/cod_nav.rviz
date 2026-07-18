@@ -54,7 +54,7 @@ Visualization Manager:
         All Enabled: false
         base_link:
           Value: true
-        base_link_fake:
+        base_link:
           Value: true
         camera_color_frame:
           Value: false
@@ -81,7 +81,7 @@ Visualization Manager:
         map:
           odom:
             base_link:
-              base_link_fake:
+              base_link:
                 {}
               camera_link:
                 camera_color_frame:

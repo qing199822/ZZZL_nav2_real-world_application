@@ -126,25 +126,7 @@ def generate_launch_description():
             ),
             # =================================================================
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(get_package_share_directory('realsense2_camera'), 'launch', 'rs_launch.py')
-                ),
-                launch_arguments={
-                    'depth_module.depth_profile': '424x240x90',    # 最高帧率
-                    #'enable_depth': 'true',
-                    #'enable_color': 'false',                        # 不需要彩色，节省USB带宽
-                    'pointcloud.enable': 'true',
-                    'pointcloud.ordered_pc': 'false',               # 无序点云，减少处理开销
-                    'pointcloud.allow_no_texture_points': 'true',   # 无彩色时必须开启
-                    'spatial_filter.enable': 'true',                # 空间滤波降噪
-                    'temporal_filter.enable': 'true',               # 时间滤波稳定深度
-                    'decimation_filter.enable': 'false',            # 不再降分辨率，已经很低
-                    'publish_tf': 'true',                           # 发布内部TF链
-                    'depth_module.enable_auto_exposure': 'true',
-                }.items()
-            ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','navigation_launch.py')),
+                PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','localization_launch.py')),
                 launch_arguments={
                                   'use_sim_time': "false",
                                   'autostart': "true",
@@ -154,7 +136,7 @@ def generate_launch_description():
                                   'container_name': 'nav2_container'}.items()
             ),
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','localization_launch.py')),
+                PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','navigation_launch.py')),
                 launch_arguments={
                                   'use_sim_time': "false",
                                   'autostart': "true",

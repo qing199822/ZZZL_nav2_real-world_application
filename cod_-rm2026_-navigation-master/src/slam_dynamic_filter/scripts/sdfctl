@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+from slam_dynamic_filter.cli import main
+
+raise SystemExit(main())

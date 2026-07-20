@@ -1,0 +1,26 @@
+slam_dynamic_filter_node:
+  ros__parameters:
+    mode: observe
+    buffer_frames: 10
+    segment_gap_m: 0.30
+    min_segment_points: 3
+    min_segment_diameter_m: 0.18
+    max_candidate_diameter_m: 1.50
+    association_distance_m: 0.75
+    dynamic_reacquire_distance_m: 0.85
+    motion_displacement_m: 0.30
+    min_motion_speed_mps: 0.12
+    max_confirmation_step_speed_mps: 1.20
+    max_confirmation_gap_sec: 0.15
+    motion_confirmation_frames: 10
+    motion_consistency_min: 0.90
+    motion_history_frames: 12
+    max_missed_frames: 4
+    max_tracks: 32
+    min_valid_beams: 3
+    max_pose_time_delta_sec: 0.15
+    odom_translation_jump_m: 0.50
+    odom_yaw_jump_rad: 0.50
+    sync_slop_sec: 0.12
+    scan_stale_timeout_sec: 1.0
+    diagnostic_period_sec: 0.5

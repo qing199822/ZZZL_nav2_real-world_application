@@ -390,3 +390,75 @@ extrinsic_R = I  (LiDAR ↔ IMU 相对位姿不变, MID-360 内部刚性固定)
 - Nav2 lifecycle 全部激活 (controller/planner/behavior/bt/smoother)
 - 串口节点正常启动 (MCU 未连接时发零速)
 - 待 MCU 连接后可进行导航闭环测试
+
+## SLAM 动态障碍物污染静态地图 (2026-07-20)
+
+### 真机复现
+- 用户已在 multiplenav online SLAM 中复现: 暂时静止的人或可移动单元会被融合进 `/map`
+- 该问题属于建图输入/occupancy fusion 问题, 与 Nav2 local costmap clearing 是不同层级的问题
+
+### 仓库证据
+- commit dfe6fa6 设计文档: docs/superpowers/specs/2026-07-19-slam-dynamic-obstacle-filter-design.md
+- untracked plan: docs/superpowers/plans/2026-07-19-slam-dynamic-obstacle-filter-autoplan.md
+
+### 候选调查路径
+- cpp_lidar_filter
+- pointcloud_to_laserscan
+- mapper_params_online_async.yaml
+- multiplenav launch
+
+### 根因调查发现
+- Existing approved design confirms current `/scan` goes directly into `slam_toolbox` without a dynamic/static temporal classifier; Nav2 STVL decay cannot remove occupancy already fused into `/map`.
+- `cpp_lidar_filter` only crops robot-body points and optionally voxel-downsamples; it has no temporal memory or motion classification.
+- `mapper_params_online_async.yaml` subscribes `scan_topic` `/scan` in lifelong mode and therefore accepts a temporarily stationary person's ranges like static observations.
+- Geometry-only LiDAR cannot identify an object that never moves throughout the session; the reported moves-then-stops case is addressable only through temporal motion tracking plus session memory.
+- Approved architecture preserves immediate `/livox/lidar_filtered` for Nav2 STVL and inserts the delayed filter only before `slam_toolbox`.
+- Autoplan's unresolved C1 gate requires real-bag evidence for projected MID-360 scan stability and same-source `/Odometry` compensation before enforce mode; Gazebo is smoke-only.
+- `multiplenav_launch.py` currently starts `cpp_lidar_filter` to `/livox/lidar_filtered`, but `pointcloud_to_laserscan` independently subscribes raw `/livox/lidar` and publishes `/scan`; therefore the SLAM path bypasses even the existing body-crop filter.
+- `slam_toolbox` consumes `/scan` directly.
+- `pointcloud_to_laserscan` projects points between z=0.1 and 1.0 m into ~722 angular bins, keeps the nearest range per bin, and sets `LaserScan time_increment=0`. Repeated returns from a stopped person have no temporal identity and look equivalent to static wall returns downstream.
+- Existing ROS bag found at `/home/wangtao/livoxviewer/bags/mid360_20260709_222428`; suitability not yet known pending metadata inspection.
+- Current root cause is confirmed: the mapping ingress has no temporal dynamic/static classification or session memory. This explains why normal SLAM parameters and STVL decay cannot solve moves-then-stops contamination.
+- Official ROS 2 Humble `laser_filters` provides `LaserArrayFilter` temporal median filtering, but this is only a short-window noise baseline: an object stationary longer than the window becomes the median and remains present; it does not provide object identity/session memory.
+- `ScanShadowsFilter` removes same-scan geometric shadow artifacts, not dynamic objects.
+- Nav2 obstacle-layer observation persistence/decay applies to runtime costmaps and cannot erase occupancy already fused into `slam_toolbox` `/map`.
+- No installed `laser_filters` support was found under `/opt/ros/humble` on this machine.
+- Therefore the minimal temporal-median baseline cannot meet the reported moves-then-stops requirement; the approved tracker/session-memory architecture is the matching pattern, subject to C1 evidence.
+- External references (treat as research data): https://index.ros.org/p/laser_filters/ ; https://docs.ros.org/en/ros2_packages/humble/api/filters/ ; https://docs.nav2.org/configuration/packages/costmap-plugins/obstacle.html ; https://docs.ros.org/en/humble/p/slam_toolbox/
+- Existing 7.84s bag is ineligible for C1 because it has only obsolete `CustomMsg` `/livox/lidar` and `/livox/imu`, lacking `PointCloud2`, `/scan_raw`, `/Odometry`, `/tf`, `/tf_static`, and a move-stop sequence.
+- User selected evidence-first C1 path on 2026-07-20.
+- Stage 0 will publish evidence-only `/scan_raw` from `/livox/lidar_filtered`, while preserving current `/scan -> slam_toolbox`; it must not implement tracker or enforce.
+
+## Phase 18 implementation decision (2026-07-20)
+- User explicitly authorized implementation of a pragmatic session-memory filter after accepting that small pre-motion artifacts can be edited manually.
+- The valid C1 run is `/home/wangtao/cod_mapping_sessions/20260719T204042Z-static-wall-motion`; it is `BLOCKED C1` only on stationary range MAD P95 (`0.4011 m` versus research threshold `0.08 m`). Scan rate, compensated residual, overlap, TF coverage, CPU and timestamp checks passed.
+- This result must not be converted to PASS by changing Stage 0 thresholds. Phase 18 is a coarse practical prototype with independent acceptance tests.
+- Required safety boundary: publish a separate `/scan_slam_filtered`; Nav2 costmaps continue consuming the live unfiltered/normal scan so remembered dynamic objects remain collision obstacles.
+- Known semantic limit: an object cannot be classified dynamic before its first observed motion; points already fused before motion are not retroactively removed from slam_toolbox and may require map editing or replay.
+- Approved-design constraints retained for the prototype: compare segment centroids in `odom`, bound tracks at 32, buffer roughly 1 second, confirm across multiple frames, mask with `NaN`, never emit fake `inf`, and retain dynamic track state through later stationarity/short occlusion.
+- A delayed frame must retain segment-to-track IDs so a motion confirmation in a later frame can retroactively mask that same track in buffered scans before publication.
+- Wall protection is required because the real projected MID-360 scan is noisy: only object-sized segments are motion candidates; long/wide static structures must not be promoted from centroid jitter alone.
+- ROS I/O will remain thin. Segmentation, association, session memory, odometry interpolation and masking will be pure Python modules testable without a live ROS graph.
+- Production `multiplenav_launch.py` currently projects raw `/livox/lidar` to `/scan` and lets slam_toolbox subscribe to its default scan topic; the standalone Phase 18 launch must instead project `/livox/lidar_filtered -> /scan_raw` and must not replace this path by default.
+- The valid 120-second C1 bag contains no dynamic-object sequence by design. It can validate replay stability/output rate only; move-stop correctness must initially come from deterministic synthetic scans, followed later by a dedicated real move-stop bag for calibration.
+- Practical v1 parameters selected for tests/config: 8-frame delay, 3+ point segments, 1.5 m maximum motion-candidate diameter, 0.20 m displacement, 0.12 m/s average speed, directional consistency, 0.75 m association gate, and 32-track hard cap. All remain YAML parameters rather than constants hidden in the algorithm.
+- Node rollout contract: `observe` computes masks but publishes the delayed scan unchanged; `enforce` publishes NaN-masked ranges. Neither mode changes the no-delay Nav2 point-cloud branch.
+- Implementation review tightened wall protection: segments outside the configured movable-object diameter range should not be tracked at all. This preserves the 32-track budget and ensures a dynamic target merging into a long wall causes no masking rather than erasing the combined wall segment.
+- Fail-closed correction: `capacity_exceeded` must suppress `/scan_slam_filtered`, not just set `ready=false`; otherwise slam_toolbox could still ingest an output from an explicitly unhealthy filter.
+- First real static-bag replay safely failed closed but exposed severe false promotion: 32/32 tracks became dynamic and no SLAM scans were published. The safety behavior worked; the initial motion classifier was not usable.
+- False-promotion forensics showed implausible segment-centroid steps (typically 2-8 m/s) and/or 0.2-0.4 s observation gaps. A conservative existing-parameter profile (`min diameter 0.18 m`, `10 frames`, `0.30 m`, consistency `0.90`, max misses `4`) reduced false dynamics from 32 to 5 without capacity exhaustion.
+- All five remaining false promotions are separable by requiring each confirmation step `<=1.2 m/s` and each confirmation gap `<=0.15 s`; four exceeded step speed and the fifth had a 0.4 s gap. These checks match the intended continuous multi-frame motion semantics.
+- The pragmatic profile should use a 10-frame buffer so the 10-frame confirmation can still mask all pending frames before publication.
+- Final static-bag validation: 1186 scans processed, 1176 outputs after warmup, zero rejects/dynamic tracks/masked beams, max 28 tracks, no capacity event, and about 0.78 ms pure-core time per scan.
+- Final live ROS replay at 2x produced 121 messages in 6 seconds (20.145 Hz wall rate), each with 723 beams, finite returns and strictly increasing source timestamps. Diagnostics were healthy/ready with zero input errors, zero dynamic tracks and no capacity event.
+- Production mapping now exposes `slam_filter_mode=disabled|observe|enforce`; disabled is the unchanged default. Filter modes remap only slam_toolbox, keep Nav2 STVL direct, and disable unconditional autosave.
+- Residual calibration risk: move-stop memory is covered by deterministic synthetic tests, but no dedicated real move-stop bag exists yet. Operator rollout must begin in observe mode on the actual robot before enforce.
+- Recorder requires PointCloud2 `/livox/lidar`, `/livox/lidar_filtered`, `/livox/imu`, `/scan_raw`, `/Odometry`, `/tf`, `/tf_static`, with `/scan` optionally recorded as current baseline.
+- Evidence scenario is a 120-second low-speed static-wall motion sequence containing stationary, left/right rotation, forward/backward, and lateral motion; analyzer infers motion from odometry.
+- Existing multiplenav `/scan` declares scan_time=0.3333 despite measured MID-360 output around 10Hz; evidence projector will use scan_time=0.1 and report observed/declared mismatch rather than changing the live SLAM path.
+
+## Phase 19 real-robot rollout (2026-07-20)
+- Session recovery reported no unsynchronized planning context.
+- Current host has no residual ROS/Livox/Point-LIO/slam_toolbox/filter processes.
+- The runbook requires first rollout in `observe`; `enforce` is gated on healthy diagnostics, ready output, no static false tracks, and a real move-stop target retaining dynamic identity.
+- Network inspection from the restricted environment failed at netlink access, so host-scoped inspection is required before launching the robot stack.

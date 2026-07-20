@@ -1,5 +1,83 @@
 # Progress Log: COD导航项目完整开发记录
 
+## Session 2026-07-20 — Phase 19 real-robot observe rollout
+
+### Start
+- Restored the planning session with `session-catchup.py`; no unsynchronized context was reported.
+- Confirmed Phase 18 implementation and static-bag/live-replay verification are complete; no ROS processes are currently left running.
+- Started Phase 19 to validate the actual robot in `observe` mode before any `enforce` rollout.
+- Restricted environment blocked netlink/network inspection (`Operation not permitted`); this is an environment limitation, not evidence of a Livox connection failure. Next step is a scoped host-side network and ROS preflight.
+
+### GitHub improve branch publication
+- Confirmed the active branch is `improve`, tracking `origin/improve`, with the approved design commit already one commit ahead locally.
+- Pre-push review found no rosbag/build/install/log artifacts in the pending file set, no common credential signatures, and no whitespace errors from `git diff --check`.
+- The pending upload contains the Stage 0 evidence tools, pragmatic session-memory filter, production opt-in wiring, focused tests, runbooks, and persistent planning records.
+- First `git add -A` attempt was blocked because the managed environment mounted `.git` read-only; no working file changed. Continue with repository-scoped Git write permission.
+- Created the feature commit, but the first push was correctly rejected because `origin/improve` had advanced concurrently; no force-push was attempted.
+- Two narrowly scoped SSH fetches disconnected mid-transfer. Fetching only the public `improve` ref over HTTPS succeeded and updated `origin/improve` to `b22a828`.
+- Compared both sides from common base `9930148`: 47 local changed paths, 7 remote changed paths, and zero overlap. Rebasing the two local commits onto the latest remote completed without conflicts.
+
+## Session 2026-07-20 — Phase 18 session-memory filter
+
+### Start
+- User authorized implementation of the pragmatic “moved once, exclude until mapping ends” behavior.
+- Closed Phase 17 with the valid real-hardware C1 result; preserved the strict 8 cm evidence threshold and production `/scan` path.
+- Started Phase 18: inspect approved design and existing Stage 0 package, then implement/test a separate `/scan_slam_filtered` path with Nav2 isolation.
+
+### Design review
+- Re-read the approved online architecture and Stage 0 constraints.
+- Selected a bounded pure-algorithm core plus thin `rclpy` node, with delayed buffered output and segment-to-track association for retrospective masking.
+- Kept production launch untouched during implementation; standalone launch defaults to observe mode until focused tests pass.
+- Inspected production mapping flow and the real C1 bag. Confirmed the bag is suitable only for static replay smoke testing, not move-stop calibration.
+
+### TDD red: pure session filter
+- Added seven deterministic behavior tests for move-stop memory, ego-motion compensation, long-wall protection, short occlusion, NaN masking, timestamp reversal and reset.
+- Confirmed the intended red state: collection fails only because `slam_dynamic_filter.session_filter` does not exist yet.
+
+### Pure filter first green
+- Implemented bounded linear scan segmentation, odom-frame centroids, greedy gated association, directional motion confirmation, session-persistent dynamic tracks and delayed NaN masking.
+- All seven initial pure behavior tests pass.
+- Review found a conservative-boundary gap: oversized wall segments could consume track capacity or be associated to a dynamic track after target/wall merging. Added this as the next TDD case before ROS wiring.
+- Added two red regression tests for that gap, then restricted tracking/association to configured object-sized segments. Nine pure tests now pass, including target/wall merge protection.
+
+### ROS interface implementation
+- Added standalone mapping launch/config, observe/enforce node, synchronized scan/odometry input, delayed output reconstruction, diagnostics, ready state, reset/freeze services and track markers.
+- Registered package dependencies, executable and three new test targets; production multiplenav launch remains untouched.
+- First combined run: 11 passed and 3 environment/assertion failures. Logged and corrected ROS log path handling for sandbox runs plus ROS array assertions.
+- New ROS/interface suite reached 14/14 passing after those corrections.
+- Safety review found and fixed an unhealthy-output leak: track-capacity exhaustion now stops SLAM scan publication instead of merely lowering `ready`. Regression suite is now 15/15.
+
+### Package verification
+- Full source suite: 57/57 tests passed.
+- ROS package build passed; colcon/ament: 12/12 test targets passed with zero failures.
+- Installed executable is discoverable as `slam_dynamic_filter slam_dynamic_filter_node`.
+- Raw flake8 showed repository-wide pre-existing E501 line-length findings plus two actionable new findings; removed the unused import and trailing blank line, then use the existing-compatible E501 exclusion for the final lint check.
+
+### Real bag replay start
+- Installed node process reached its startup log in observe mode.
+- Managed sandbox blocked Fast DDS local UDP sockets, so the restricted process was stopped cleanly; replay will be rerun with scoped local ROS communication permission.
+- First permitted replay had no synchronized output because direct `ros2 run` omitted the launch file's `odometry -> /Odometry` remap; DDS graph inspection confirmed the mismatch.
+- Ctrl+C also exposed double shutdown after ROS signal handling; guarded shutdown with `rclpy.ok()` before rerunning.
+- With the correct remap, the first static-bag replay reported 32 dynamic tracks, capacity exceeded, zero published scans. This is a valid fail-closed result but blocks enforce.
+- Copied the immutable compressed bag to an explicit `/tmp` directory for offline read/decompression and profiled every false promotion.
+- Parameter sweep reduced false positives to five; identified step-speed and observation-gap checks that distinguish all remaining false tracks in this bag. TDD those checks next.
+
+### Conservative calibration and production opt-in
+- Added step-speed and continuous-observation regression tests, then moved pragmatic defaults to 10 frames, 0.30 m displacement, 0.90 consistency, 0.18 m minimum diameter, 1.20 m/s maximum step and 0.15 s maximum gap.
+- Full offline static bag: 1186 processed, 1176 delayed outputs, zero rejects, zero dynamic tracks, zero masked beams, max 28 tracks, no capacity event, about 0.78 ms/scan core time.
+- Live ROS replay at 2x: 121 probe messages in 6 s (20.145 Hz wall rate), all 723 beams, nonempty finite data, strictly increasing source timestamps; diagnostics healthy with ready=true, zero dynamic tracks/errors/capacity.
+- Added production `slam_filter_mode=disabled|observe|enforce`; default disabled preserves old path. Filter modes route only slam_toolbox, preserve Nav2 STVL, and suppress unconditional autosave.
+- Added Chinese runbook `docs/PRAGMATIC_MAPPING_FILTER.md` and linked it from quick start.
+
+### Final verification
+- Source pytest: 61/61 passed; compatible flake8 and `git diff --check` passed.
+- Built `slam_dynamic_filter` and `cod_bringup` successfully.
+- `slam_dynamic_filter` colcon suite: 13/13 test targets passed.
+- `cod_bringup`: lint_cmake, pep257 and xmllint passed; package-wide flake8 still fails on 41 legacy findings across unrelated launch files. The touched `multiplenav_launch.py` passes `ament_flake8` by itself.
+- `ros2 launch ... --show-args` confirms `slam_filter_mode` choices and default `disabled`; focused production opt-in tests pass 2/2.
+- Stopped replay/node processes cleanly and removed the exact `/tmp` bag copy and Python cache. Original evidence remains unchanged.
+- ROS bag playback left a derived 1 GB `bag_0.db3` beside the compressed evidence; verified metadata references only zstd, moved the sidecar to the desktop trash, and rechecked that the evidence directory contains only `bag_0.db3.zstd` plus `metadata.yaml`.
+
 ## Session 2026-07-05
 
 ### 15:00-15:08 — 代码探索
@@ -266,3 +344,24 @@
 - [ ] MCU 串口连接 (/dev/cod_mcu)
 - [ ] 导航闭环测试 (设置goal验证运动)
 - [ ] 恢复 realsense2_camera (安装驱动后)
+
+## Session 2026-07-20 — SLAM 动态障碍物污染调查
+
+### 真机复现
+- 用户在 multiplenav online SLAM 中复现: 暂时静止的人/可移动单元会被融合进 `/map`
+
+### 调查状态
+- 开始 systematic-debugging, 尚未修改任何参数
+- 当前分支: improve/HEAD dfe6fa6
+- docs/superpowers/plans 为 untracked, 后续仅读取参考, 不覆盖
+- Read approved design, autoplan review, `cpp_lidar_filter`, and mapper params.
+- Root-cause direction: missing temporal classifier before `slam_toolbox`, not a costmap clearing parameter issue.
+- No source/config change made; next inspect launch/converter and locate a usable real bag.
+- Verified exact launch/converter path and confirmed root cause.
+- Located one older MID-360 bag; next inspect metadata and remaining approved-plan gate before deciding whether it can be used for C1.
+- Compared official ROS filter patterns: temporal median and shadow filters do not satisfy session-memory semantics.
+- Rejected old bag as C1 evidence due missing topics/type/scenario.
+- Pattern analysis complete; next decision is evidence-first Stage 0 (recommended) versus implementing only an observe-mode prototype before evidence.
+- User chose evidence-first path.
+- Stage 0 architecture locked: evidence-only scan projector, fail-fast recorder, frozen metadata, pure metrics, C1 gate; no tracker and no slam_toolbox remap.
+- Writing a dedicated executable micro-task plan before implementation.

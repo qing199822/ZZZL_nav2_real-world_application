@@ -1,5 +1,9 @@
 # COD 导航系统 — 快速启动指南
 
+For Stage 0 SLAM dynamic-filter evidence collection, see [MAPPING_EVIDENCE_RUNBOOK.md](../cod_-rm2026_-navigation-master/docs/MAPPING_EVIDENCE_RUNBOOK.md).
+
+For the pragmatic move-stop mapping filter, see [PRAGMATIC_MAPPING_FILTER.md](../cod_-rm2026_-navigation-master/docs/PRAGMATIC_MAPPING_FILTER.md).
+
 ## 前置条件
 
 - Ubuntu 22.04 + ROS2 Humble

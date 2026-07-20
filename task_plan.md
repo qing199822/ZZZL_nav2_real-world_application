@@ -6,7 +6,7 @@
 3. 创建完整操作文档，覆盖真机和仿真两种模式
 
 ## Current Phase
-Phase 15 完成 ✅ — 真机雷达验证通过
+Phase 19 进行中 🚧 — 真机 observe 模式验证移动后停止目标与静态场景误报
 
 ## Phases
 
@@ -145,6 +145,23 @@ Phase 15 完成 ✅ — 真机雷达验证通过
 | Error | Phase | Resolution |
 |-------|-------|------------|
 | model://rmul_2025 无法找到 | 11 | env hook 改用 GZ_SIM_RESOURCE_PATH |
+| direct Edit 被 Composer hook 阻止 | 17 | 使用 composer_code_cli 完成精确的 planning-only 更新 |
+| old ROS bag rejected because it lacks PointCloud2/current scan/odom/TF and move-stop scenario | 17 | resolution is a new complete 120-second evidence capture |
+| `test_session_filter.py` cannot import `slam_dynamic_filter.session_filter` | 18 | expected TDD red; implement the pure algorithm module next |
+| ROS launch test cannot create `~/.ros/log` in managed sandbox | 18 | point `ROS_LOG_DIR` to `/tmp` for sandboxed tests; production behavior unchanged |
+| ROS message sequence assertions compared `array('f')` directly to list | 18 | compare `list(message.ranges/intensities)` in tests |
+| source node wrapper chmod denied by managed sandbox | 18 | request scoped permission for file-mode update; CMake install remains declared |
+| `colcon test-result` attempted to create a new workspace log under sandbox | 18 | rely on the completed 12/12 CTest output; rerun result summary only with writable log scope if needed |
+| sandboxed Fast DDS cannot create local UDP socket (`Operation not permitted`) | 18 | stop the restricted node and rerun scoped ROS replay commands with local DDS permission |
+| first direct replay used relative `odometry` instead of bag topic `/Odometry` | 18 | restart the node with the same remaps declared by `mapping_filter.launch.py` |
+| Ctrl+C caused a second `rclpy.shutdown()` and RCLError | 18 | catch KeyboardInterrupt and call shutdown only while `rclpy.ok()` |
+| compressed bag reader needed write access beside immutable evidence | 18 | copy exact bag/metadata to `/tmp`, analyze there, then remove the 1.28 GB temporary copy |
+| cod_bringup package-wide flake8 reports 41 pre-existing issues | 18 | clean all findings in touched `multiplenav_launch.py`; leave unrelated singlenav/navigation legacy formatting unchanged |
+| sandboxed `py_compile` tried to create source `__pycache__` | 18 | rerun with `PYTHONPYCACHEPREFIX=/tmp/codex_pycache`, then remove that temporary cache |
+| final `ament_flake8` invocation omitted ROS environment | 18 | source `/opt/ros/humble/setup.bash` and rerun the same touched-file check |
+| `git add -A` cannot create `.git/index.lock` because managed Git metadata is read-only | 19 | rerun the repository-scoped Git write with explicit approval; working files were unaffected |
+| first `git push origin improve` rejected as non-fast-forward | 19 | fetch and integrate the concurrently updated remote branch; never force-push |
+| two SSH fetch attempts disconnected (`early EOF`) | 19 | fetch the same public `improve` ref over HTTPS; completed successfully |
 
 ### Phase 13: 参考仓库验证 + SLAM 测试 ✅
 - [x] 克隆参考仓库 (github.com/qing199822/ZZZL_nav2_real-world_application)
@@ -168,3 +185,30 @@ Phase 15 完成 ✅ — 真机雷达验证通过
 - [ ] 设置导航目标点验证运动控制
 - [ ] 恢复realsense2_camera (安装驱动后)
 - **Status:** pending
+
+### Phase 17: SLAM 动态障碍物污染静态地图调查与修复 ✅
+- [x] trace multiplenav LiDAR→point-cloud filter→LaserScan→slam_toolbox data flow
+- [x] review existing dynamic-obstacle design against real config
+- [x] 实现 evidence-only `/scan_raw` 投影、完整真机 recorder 和冻结 metadata（不改变 `/scan -> slam_toolbox`）
+- [x] 实现 scan/odom/TF/R5 指标和机器可读 C1 gate
+- [x] 录制 120 秒 static-wall-motion 真机证据并执行分析
+- [x] 记录有效 `BLOCKED C1`：仅静止量测噪声未满足研究级 8 cm 门限，其他检查通过
+- **Status:** complete
+
+### Phase 18: 建图专用 session-memory 动态过滤器 ✅
+- [x] 复核已批准设计、Stage 0 包结构和生产 launch 数据流
+- [x] 定义粗粒度聚类/关联/运动确认/会话记忆的纯算法接口与参数
+- [x] 实现 `/scan_raw -> /scan_slam_filtered` ROS 节点；只影响 SLAM，不影响 Nav2 costmap
+- [x] 增加单元测试和合成 move-stop 场景，覆盖静态墙、移动后停止、跟踪丢失及保守失败行为
+- [x] 使用现有真机 bag 做回放烟雾测试并检查话题/频率/非空输出
+- [x] 验证通过后提供 `disabled|observe|enforce` opt-in；生产默认仍为 `disabled`
+- **Status:** complete
+
+### Phase 19: 真机 observe 模式标定与准入验证 🚧
+- [ ] 核对雷达直连网络、驱动和工作空间构建产物
+- [ ] 启动 `multiplenav_launch.py slam_filter_mode:=observe`
+- [ ] 验证过滤器健康状态、输出频率、静态环境零误报
+- [ ] 让代表性移动单位完成“移动后停止”，确认产生并保留动态轨迹
+- [ ] 记录专用 move-stop bag 和诊断结果
+- [ ] 根据证据决定是否进入受控 `enforce` 试验
+- **Status:** in_progress

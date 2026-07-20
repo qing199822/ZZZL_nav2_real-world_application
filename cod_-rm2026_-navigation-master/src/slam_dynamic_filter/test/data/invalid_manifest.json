@@ -1,0 +1,7 @@
+{
+  "schema_version": 2,
+  "session_id": "../bad",
+  "scenario": "wrong",
+  "git_sha": "",
+  "config_hash": "not-a-hash"
+}

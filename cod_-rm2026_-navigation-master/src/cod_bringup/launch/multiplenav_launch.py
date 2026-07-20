@@ -1,9 +1,9 @@
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.substitutions import FindPackageShare
@@ -20,14 +20,37 @@ def generate_launch_description():
         'use_sim_time', default_value='false',
         description='Use simulation (Gazebo) clock if true')
     declare_slam_params_file = DeclareLaunchArgument(
-        'slam_params_file', default_value=os.path.join(bring_up_dir,'params','mapper_params_online_async.yaml')
+        'slam_params_file',
+        default_value=os.path.join(
+            bring_up_dir, 'params', 'mapper_params_online_async.yaml'
+        ),
     )
     declare_nav2_params_file = DeclareLaunchArgument(
-        'nav2_params_file',default_value=os.path.join(bring_up_dir,'params','multiplenav2_params.yaml')
+        'nav2_params_file',
+        default_value=os.path.join(
+            bring_up_dir, 'params', 'multiplenav2_params.yaml'
+        ),
+    )
+    declare_slam_filter_mode = DeclareLaunchArgument(
+        'slam_filter_mode',
+        default_value='disabled',
+        choices=['disabled', 'observe', 'enforce'],
+        description='Optional session-memory filter for the slam_toolbox scan only',
     )
     use_sim_time = LaunchConfiguration('use_sim_time')
     slam_params_file = LaunchConfiguration('slam_params_file')
     nav2_params_file = LaunchConfiguration('nav2_params_file')
+    slam_filter_mode = LaunchConfiguration('slam_filter_mode')
+
+    def filter_disabled_condition():
+        return IfCondition(PythonExpression([
+            "'", slam_filter_mode, "' == 'disabled'",
+        ]))
+
+    def filter_enabled_condition():
+        return UnlessCondition(PythonExpression([
+            "'", slam_filter_mode, "' == 'disabled'",
+        ]))
 
     # 定义节点和包含的launch文件
     load_nodes = GroupAction(
@@ -64,6 +87,7 @@ def generate_launch_description():
             ),
             Node(
                 package='pointcloud_to_laserscan', executable='pointcloud_to_laserscan_node',
+                condition=filter_disabled_condition(),
                 remappings=[('cloud_in',  '/livox/lidar'),
                             ('scan', '/scan')],
                 parameters=[{
@@ -82,15 +106,42 @@ def generate_launch_description():
                 }],
                 name='pointcloud_to_laserscan'
             ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    PathJoinSubstitution([
+                        FindPackageShare('slam_dynamic_filter'),
+                        'launch',
+                        'mapping_filter.launch.py',
+                    ])
+                ),
+                condition=filter_enabled_condition(),
+                launch_arguments={
+                    'mode': slam_filter_mode,
+                    'use_sim_time': use_sim_time,
+                }.items(),
+            ),
             Node(
                 package='slam_toolbox',
                 executable='async_slam_toolbox_node',
                 name='slam_toolbox',
+                condition=filter_disabled_condition(),
                 output='screen',
                 parameters=[
                     slam_params_file,
                     {'use_sim_time': use_sim_time}
                 ],
+            ),
+            Node(
+                package='slam_toolbox',
+                executable='async_slam_toolbox_node',
+                name='slam_toolbox',
+                condition=filter_enabled_condition(),
+                output='screen',
+                parameters=[
+                    slam_params_file,
+                    {'use_sim_time': use_sim_time}
+                ],
+                remappings=[('/scan', '/scan_slam_filtered')],
             ),
             Node(
                 package="tf2_ros",
@@ -163,7 +214,11 @@ def generate_launch_description():
             #     }.items()
             # ),
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','navigation_launch.py')),
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        bring_up_dir, 'launch', 'navigation_launch.py'
+                    )
+                ),
                 launch_arguments={
                                   'use_sim_time': "false",
                                   'autostart': "true",
@@ -175,14 +230,19 @@ def generate_launch_description():
             Node(
                 package='rviz2',
                 executable='rviz2',
-                arguments=['-d',rviz_config_file],
+                arguments=['-d', rviz_config_file],
                 output='screen',
             ),
             IncludeLaunchDescription(
-                   PythonLaunchDescriptionSource(
-                   os.path.join(get_package_share_directory('cod_bringup'), 'launch', 'auto_save_map.launch.py')
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        get_package_share_directory('cod_bringup'),
+                        'launch',
+                        'auto_save_map.launch.py',
+                    )
+                ),
+                condition=filter_disabled_condition(),
             )
-          )
         ]
     )
 
@@ -190,5 +250,6 @@ def generate_launch_description():
         declare_use_sim_time,
         declare_slam_params_file,
         declare_nav2_params_file,
+        declare_slam_filter_mode,
         load_nodes
     ])

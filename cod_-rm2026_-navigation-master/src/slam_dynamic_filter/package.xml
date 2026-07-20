@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>slam_dynamic_filter</name>
+  <version>0.0.1</version>
+  <description>Evidence tooling and an opt-in session-memory SLAM scan filter.</description>
+  <maintainer email="robot@example.invalid">COD Robot Team</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <build_depend>ament_cmake_python</build_depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>message_filters</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>pointcloud_to_laserscan</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-psutil</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>rosbag2_py</exec_depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>tf2_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

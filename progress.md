@@ -16,6 +16,8 @@
 - Created the feature commit, but the first push was correctly rejected because `origin/improve` had advanced concurrently; no force-push was attempted.
 - Two narrowly scoped SSH fetches disconnected mid-transfer. Fetching only the public `improve` ref over HTTPS succeeded and updated `origin/improve` to `b22a828`.
 - Compared both sides from common base `9930148`: 47 local changed paths, 7 remote changed paths, and zero overlap. Rebasing the two local commits onto the latest remote completed without conflicts.
+- The post-rebase SSH push on port 22 was closed during key exchange. The host has neither GitHub CLI nor an HTTPS credential helper, so the next non-destructive transport fallback is GitHub's SSH endpoint on port 443 using the existing key.
+- A second amend request was rejected when the approval review stream disconnected. Keep the existing feature commit unchanged and put these already-staged publication notes in a separate documentation commit.
 
 ## Session 2026-07-20 — Phase 18 session-memory filter
 

@@ -40,9 +40,9 @@ def generate_launch_description():
                 parameters=[{
                     'input_topic': '/livox/lidar',
                     'output_topic': '/livox/lidar_filtered',
-                    'min_x': -0.25, 'max_x': 0.4,
-                    'min_y': -0.25, 'max_y': 0.45,
-                    'min_z': -0.4, 'max_z': 0.25,
+                    'min_x': -0.2, 'max_x': 0.2,
+                    'min_y': -0.2, 'max_y': 0.4,
+                    'min_z': -0.1, 'max_z': 0.2,
                     'negative': True,   # 挖掉车身
                     'leaf_size': 0.05   # 降采样
                 }]
@@ -123,7 +123,7 @@ def generate_launch_description():
                 arguments=[
                     "--x", "0.0",
                     "--y", "0.0",
-                    "--z", "0.15",
+                    "--z", "0.46",
                     "--roll", "0.0",
                     "--pitch", "0.7854",   # Pitch +45°: LiDAR前倾
                     "--yaw", "0.0",
@@ -152,6 +152,16 @@ def generate_launch_description():
                 ],
             ),
             # =================================================================
+            # TODO: 暂时注释 — 真机未安装 realsense2_camera，仅验证雷达管线
+            # IncludeLaunchDescription(
+            #     PythonLaunchDescriptionSource(
+            #         os.path.join(get_package_share_directory('realsense2_camera'),'launch','rs_launch.py')
+            #     ),
+            #     launch_arguments={
+            #         'depth_module.depth_profile': '1280x720x30',
+            #         'pointcloud.enable': 'true'
+            #     }.items()
+            # ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','navigation_launch.py')),
                 launch_arguments={

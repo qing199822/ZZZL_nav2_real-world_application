@@ -156,13 +156,15 @@ void IntensityVoxelLayer::updateBounds(
         continue;
       }
 
-      // now we need to compute the map coordinates for the observation
+      // Skip points below the voxel layer floor or above the ceiling
+      double max_z = origin_z_ + size_z_ * z_resolution_;
+      if (pz < origin_z_ || pz >= max_z) {
+        continue;
+      }
+
+      // Compute map coordinates for the observation
       unsigned int mx, my, mz;
-      if (pz < origin_z_) {
-        if (!worldToMap3D(px, py, origin_z_, mx, my, mz)) {
-          continue;
-        }
-      } else if (!worldToMap3D(px, py, pz, mx, my, mz)) {
+      if (!worldToMap3D(px, py, pz, mx, my, mz)) {
         continue;
       }
 

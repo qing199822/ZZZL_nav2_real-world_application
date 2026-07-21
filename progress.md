@@ -151,3 +151,118 @@
 - GLM 5.2 发现 12 问题 (1 CRITICAL + 2 HIGH + 4 MEDIUM + 5 LOW)
 - 12/12 修复完成 ✅
 - gcc -fsyntax-only: 5/5 .c 文件 0 errors ✅
+
+## Session 2026-07-15 — LiDAR 45° 前倾安装参数适配
+
+### 方案讨论
+- 用户反馈: MID-360 雷达安装倾斜了 45° (前倾 Pitch)
+- 分析需要修改的文件: 6 个 launch/URDF + 确认 mid360.yaml 不改
+- 设计原则: Pitch 写入 base_link→livox_frame TF, extrinsic_R 保持 I
+  - MID-360 内部 LiDAR 和 IMU 芯片刚性固定, 倾斜整个模块不改变相对旋转
+  - 如果写入 extrinsic_R, LIO 重力方向对不上, 里程计发散
+
+### 文件修改 (7 files)
+- 真机: singlenav_launch.py + multiplenav_launch.py (pitch 0.0→0.7854)
+- 仿真: gazebo_sim + gazebo_slam + sim_standalone launch (新增/修改 pitch)
+- 仿真: cod_robot.urdf.xacro (rpy 0 0 0 → 0 0.7854 0)
+- mid360.yaml: extrinsic_R 保持不变, 添加注释说明
+
+### 审查
+- reviewer agent 审查: ✅ 通过, 无功能性问题
+- 发现 4 cosmetic 问题 (注释格式不一致) → 全部修复
+
+### 交付物
+- 迁移文档: ~/程序改动迁移文件夹/LiDAR_45度前倾安装_参数改动记录.md (172行)
+
+## Session 2026-07-16 — 参考仓库验证 + SLAM 测试
+
+### 22:38-22:44 — 仓库克隆+构建
+- git clone https://github.com/qing199822/ZZZL_nav2_real-world_application → ~/ZZZL_nav2_reference
+- rosdep install (部分失败, sudo 不可用) → colcon build --symlink
+- 15/15 包构建通过 ✅
+
+### 22:44-22:50 — SLAM 配置验证
+- slam_toolbox 独立启动: 配置加载成功 ✅
+- syntax check: 6/6 launch 文件语法正确 ✅
+- multiplenav_launch.py 启动测试: 17/17 节点启动成功 ✅
+- 验证: livox_frame TF pitch=0.7854, Nav2 lifecycle 全部激活
+
+### 关键发现
+- SLAM 仅在 multiplenav (多点导航) 和 gazebo_slam (仿真) 中集成
+- singlenav (单点导航) 是纯定位模式, 需要预建地图
+- 参考仓库代码与我们项目完全一致
+
+## Session 2026-07-17 — 导航代码安全审查+修复
+
+### 21:24-21:40 — 代码审查
+- ask_gateway 全面审查 9 个导航源文件 + Nav2 配置文件
+- 发现 8 CRITICAL + 多 HIGH/MEDIUM 问题
+- 综合评分: 4.7/10 (原型可用，高速前需修复)
+
+### 21:40-22:00 — 安全修复实施
+- PID: 积分顺序修复, derivative kick防护, NaN保护, reset/setGains
+- 碰撞检测: fail-open→fail-safe(costmap越界→不安全), 密集采样, NO_INFORMATION检查
+- GoalApproachController: TF变换goal, 保留angular.z, 上限限速, TF失败→透传
+- fake_vel_transform: angular.z透传, TF补平移, watchdog, enable_vel_rotation开关
+- cod_serial: 持久连接, 修正include, 日志降级, 断线重连退避
+- intensity_voxel_layer: 丢弃超Z范围点(不再钳位)
+- filter_node: 参数缓存+动态回调, voxel滤波参数化
+- 配置: controller_frequency 50→30Hz, progress_checker 999→30s
+
+### 22:00-22:10 — 坐标系对齐(首测)
+- Nav2 robot_base_frame: base_link_fake→base_link (全部5处)
+- fake_vel_transform enable_vel_rotation 默认 false (直通模式)
+- 验证速度方向链: Nav2 vx→base_link+x→LiDAR前倾方向→电控vx 三者一致
+
+### 22:10-22:20 — 复查+文档
+- ask_gateway复查: 7/7项通过, 修复残留的TF fallback问题
+- gpt55复查: 确认修复有效
+- 生成 docs/nav2_code_fixes.md (640行完整修复记录)
+
+### 22:20-22:40 — 高速自转方案讨论
+- 确认 base_link_fake 在自转1.5rad/s下是合理的field-centric control设计
+- 确认圆形footprint + Omni MPPI适配自转场景
+- 确认首测用直通模式, 自转时切回旋转模式
+
+### 修改文件统计
+| 文件 | 行数变化 |
+|------|---------|
+| pid.hpp | 重构 (+integral_min/max, reset, setGains, getIntegral) |
+| pid.cpp | 重写 (积分顺序, 防kick, NaN保护, dt验证) |
+| omni_pid_pursuit_controller.cpp | ~800行中修复6处关键逻辑 |
+| goal_approach_controller.cpp | 重写 (TF变换, 上限限速, 透传) |
+| fake_vel_transform.hpp/cpp | 重写 (透传angular.z, watchdog, 旋转开关) |
+| cod_serial.cpp | 重写 (持久连接, 日志降级, 重连) |
+| intensity_voxel_layer.cpp | 1处逻辑修复 (Z范围) |
+| filter_node.cpp | 重写 (参数缓存, 动态回调) |
+| back_up_free_space.cpp | 1处修复 (去重) |
+| singlenav2_params.yaml | 5处参数调整 |
+
+## Session 2026-07-18 — 真机雷达验证
+
+### 02:36-02:40 — 构建修复
+- livox_ros_driver2 符号链接冲突 → 清理重建
+- cod_serial_ul26 const Clock + 缺失 uart_transporter → 修复
+- pb_omni_pid_pursuit_controller 括号错误 + ControllerException → 修复
+- 16/16 包构建通过 (首次包含 Phase 14 全部修复)
+
+### 02:41-02:46 — 雷达驱动测试
+- livox_ros_driver2 启动成功, LiDAR 10Hz + IMU 200Hz
+- 发现 xfer_format=1 导致 CustomMsg/PointCloud2 类型冲突
+- 修复 xfer_format=0 → PointCloud2
+
+### 02:45-02:50 — 导航系统启动
+- 发现 launch 文件 --pitch 0.7854--yaw 语法错误 → 修复缺逗号
+- 注释 realsense2_camera (未安装)
+- 全系统启动: 22 节点全部存活
+
+### 02:48 — 管线验证通过
+- /Odometry: nav_msgs/Odometry, odom→base_link ✅
+- /map: OccupancyGrid, 0.05m分辨率, SLAM建图 ✅  
+- /scan: LaserScan, slam_toolbox订阅 ✅
+- 修复3个bug, 雷达感知-定位-建图管线完整可用
+
+### 待完成
+- [ ] MCU 串口连接 (/dev/cod_mcu)
+- [ ] 导航闭环测试 (设置goal验证运动)
+- [ ] 恢复 realsense2_camera (安装驱动后)

@@ -6,7 +6,7 @@
 3. 创建完整操作文档，覆盖真机和仿真两种模式
 
 ## Current Phase
-所有阶段完成 ✅ — 交付物就绪，硬件部署待用户执行
+Phase 15 完成 ✅ — 真机雷达验证通过
 
 ## Phases
 
@@ -98,6 +98,8 @@
 | 仿真里程计 | Gazebo DiffDrive (替代LIO) | 真机用LIO, 仿真用ground truth |
 | 仿真驱动 | ros_gz_bridge (替代serial) | cmd_vel→Gazebo, Odometry/LiDAR/IMU→ROS |
 
+| TF 倾斜 (v2) | base_link→livox_frame TF 写入 pitch | extrinsic_R (IMU↔LiDAR内部) 保持不变, 重力方向正确 |
+
 ## Deliverables
 | 交付物 | 位置 |
 |--------|------|
@@ -114,7 +116,55 @@
 - [x] 重测全部 5 个世界: 全部加载成功
 - **Status:** complete
 
+### Phase 12: LiDAR 45° 前倾安装参数适配 ✅
+- [x] 确定修改方案: Pitch 写入 base_link→livox_frame TF，不改 extrinsic_R
+- [x] 真机: singlenav_launch.py + multiplenav_launch.py (pitch 0.0→0.7854)
+- [x] 仿真: gazebo_sim + gazebo_slam + sim_standalone launch + cod_robot.urdf.xacro
+- [x] mid360.yaml extrinsic_R 保持单位矩阵 (IMU/LiDAR 芯片相对旋转不变)
+- [x] reviewer 审查通过 (无功能性问题, 4 cosmetic 修复)
+- [x] 生成迁移文档: ~/程序改动迁移文件夹/LiDAR_45度前倾安装_参数改动记录.md
+- **Status:** complete
+
+### Phase 14: 导航代码安全修复 + 坐标系对齐 ✅
+- [x] ask_gateway 全面审查导航代码 (6个源文件 + 配置文件)
+- [x] 修复 PID: 积分限幅顺序, derivative kick, NaN保护, reset/setGains
+- [x] 修复碰撞检测: fail-open→fail-safe, 密集采样, NO_INFORMATION检查
+- [x] 修复 GoalApproachController: TF变换goal, 保留angular.z, 上限限速
+- [x] 修复 fake_vel_transform: angular.z透传, TF补平移, watchdog, enable_vel_rotation开关
+- [x] 重构 cod_serial: 持久连接, 修正include, 日志降级, 断线重连
+- [x] 修复 intensity_voxel_layer: 丢弃超Z范围点(不再钳位)
+- [x] 优化 filter_node: 参数缓存+动态回调, voxel滤波参数化
+- [x] 配置调整: controller_frequency 50→30Hz, progress_checker 999→30s
+- [x] 坐标系对齐: Nav2 robot_base_frame→base_link, enable_vel_rotation→false(首测)
+- [x] 生成修复文档: docs/nav2_code_fixes.md (640行)
+- [x] 复查确认 7/7 修复项通过 (ask_gateway + gpt55)
+- **Status:** complete
+
+
 ## Errors Encountered (追加)
 | Error | Phase | Resolution |
 |-------|-------|------------|
 | model://rmul_2025 无法找到 | 11 | env hook 改用 GZ_SIM_RESOURCE_PATH |
+
+### Phase 13: 参考仓库验证 + SLAM 测试 ✅
+- [x] 克隆参考仓库 (github.com/qing199822/ZZZL_nav2_real-world_application)
+- [x] colcon build 15/15 包通过
+- [x] slam_toolbox 配置加载验证 (CeresSolver, lifelong 模式)
+- [x] multiplenav_launch.py 17 节点启动验证
+- [x] 确认两仓库代码一致
+- **Status:** complete
+
+### Phase 15: 真机雷达验证 ✅
+- [x] 构建修复: const Clock, uart_transporter链接, PID括号, ControllerException
+- [x] xfer_format=1→0 (CustomMsg→PointCloud2)
+- [x] launch文件语法修复 (livox_frame TF缺逗号)
+- [x] 注释realsense2_camera (未安装)
+- [x] 雷达→LIO→SLAM全管线验证通过
+- [x] Odometry+Map+Scan 数据确认
+- **Status:** complete
+
+### Phase 16: MCU连接+导航闭环测试 (待MCU就绪)
+- [ ] 连接MCU (/dev/cod_mcu)
+- [ ] 设置导航目标点验证运动控制
+- [ ] 恢复realsense2_camera (安装驱动后)
+- **Status:** pending

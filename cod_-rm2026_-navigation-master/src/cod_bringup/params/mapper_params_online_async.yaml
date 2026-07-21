@@ -1,76 +1,76 @@
-slam_toolbox:
-  ros__parameters:
+slam_toolbox:  # slam_toolbox 节点的参数命名空间；下面所有参数都会传给该节点，用于在线异步建图/长期建图
+  ros__parameters:  # ROS 2 参数固定入口；该层级下的键值会作为节点参数加载
 
-    # Plugin params
-    solver_plugin: solver_plugins::CeresSolver
-    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
-    ceres_preconditioner: SCHUR_JACOBI
-    ceres_trust_strategy: LEVENBERG_MARQUARDT
-    ceres_dogleg_type: TRADITIONAL_DOGLEG
-    ceres_loss_function: None
+    # Plugin params  # 求解器插件相关参数；主要决定图优化后端如何求解位姿图
+    solver_plugin: solver_plugins::CeresSolver  # 使用 Ceres 作为位姿图优化求解器；负责根据激光匹配约束、里程计约束、回环约束优化机器人轨迹和地图
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY  # Ceres 线性方程求解器类型；稀疏 Cholesky 适合 SLAM 位姿图这种稀疏矩阵问题，通常精度和稳定性较好
+    ceres_preconditioner: SCHUR_JACOBI  # Ceres 预条件器类型；用于改善迭代求解收敛速度，Schur-Jacobi 常用于带 Schur 结构的优化问题
+    ceres_trust_strategy: LEVENBERG_MARQUARDT  # Ceres 信赖域策略；LM 方法在非线性最小二乘中较稳健，常用于 SLAM 扫描匹配/图优化
+    ceres_dogleg_type: TRADITIONAL_DOGLEG  # Dogleg 策略类型；仅在使用 DOGLEG 信赖域策略时更关键，这里保留传统 Dogleg 配置以兼容参数集
+    ceres_loss_function: None  # 鲁棒核函数设置；None 表示不额外使用鲁棒损失函数，异常约束不会被核函数自动降权
 
 
-    # ROS Parameters
-    odom_frame: odom
-    map_frame: map
-    base_frame: base_link
-    scan_topic: /scan
-    use_map_saver: true
-    mode: lifelong #localization
+    # ROS Parameters  # ROS 坐标系、话是什么题和运行模式相关参数；决定 slam_toolbox 与 TF/激光/地图保存等 ROS 组件如何连接
+    odom_frame: odom  # 里程计坐标系名称；通常由底盘里程计或融合定位发布，表示短时间连续但可能漂移的局部坐标系
+    map_frame: map  # 地图坐标系名称；slam_toolbox 会在该全局坐标系下维护栅格地图，并通过 map->odom 修正累计漂移
+    base_frame: base_link  # 机器人本体坐标系名称；激光数据最终会变换到该坐标系，用于估计机器人位姿和更新地图
+    scan_topic: /scan  # 激光雷达扫描话题；slam_toolbox 从该话题订阅 LaserScan 数据进行扫描匹配和建图
+    use_map_saver: true  # 是否启用地图保存服务/能力；true 表示可以通过相关服务把当前构建的地图保存到文件
+    mode: lifelong #localization  # 建图模式设置为 lifelong，表示长期持续建图并可持续更新地图；原注释中的 localization 提示可切换为纯定位模式
 
-    # if you'd like to immediately start continuing a map at a given pose
-    # or at the dock, but they are mutually exclusive, if pose is given
-    # will use pose
-    #map_file_name: test_steve
-    # map_start_pose: [0.0, 0.0, 0.0]
-    #map_start_at_dock: true
+    # if you'd like to immediately start continuing a map at a given pose  # 如果希望启动后接着已有地图继续建图，可以配置地图文件和初始位姿
+    # or at the dock, but they are mutually exclusive, if pose is given  # 可以选择给定初始位姿或从充电桩/停靠点开始，但两者互斥
+    # will use pose  # 如果同时给了 pose，系统会优先使用 pose 作为初始位姿
+    #map_file_name: test_steve  # 可选：已有地图文件名；取消注释后可从指定地图继续建图/定位
+    # map_start_pose: [0.0, 0.0, 0.0]  # 可选：在已有地图中的初始位姿 [x, y, yaw]，单位通常为米和弧度
+    #map_start_at_dock: true  # 可选：是否从 dock/停靠点开始；适合机器人固定从充电桩出发的场景
 
-    debug_logging: false
-    throttle_scans: 1 #信任里程计
-    transform_publish_period: 0.0 #if 0 never publishes odometry
-    map_update_interval: 1.0
-    resolution: 0.05
-    min_laser_range: 0.2 #for rastering images
-    max_laser_range: 10.0 #for rastering images
-    minimum_time_interval: 0.3
-    transform_timeout: 0.2
-    tf_buffer_duration: 30.
-    stack_size_to_use: 40000000 #// program needs a larger stack size to serialize large maps
-    enable_interactive_mode: true
+    debug_logging: false  # 是否开启 slam_toolbox 调试日志；false 减少终端输出，true 便于排查匹配、TF、回环等问题
+    throttle_scans: 1 #信任里程计  # 激光帧降采样比例；1 表示每帧激光都处理，数值越大处理越少，原注释提示当前配置更信任里程计连续性
+    transform_publish_period: 0.0 #if 0 never publishes odometry  # TF 发布周期，单位秒；0.0 表示不周期性发布由 slam_toolbox 生成的 odom 相关变换，原注释说明 0 时不会发布 odometry
+    map_update_interval: 1.0  # 地图更新周期，单位秒；控制栅格地图发布/刷新频率，数值越小地图更新越频繁但计算开销更高
+    resolution: 0.05  # 地图分辨率，单位米/栅格；0.05 表示每个栅格代表 5cm，越小越精细但地图内存和计算量越大
+    min_laser_range: 0.2 #for rastering images  # 激光最小有效距离，单位米；小于该距离的点会被忽略，避免机器人本体或近距离噪声污染地图
+    max_laser_range: 10.0 #for rastering images  # 激光最大有效距离，单位米；大于该距离的点会被忽略，限制建图使用的激光范围并减少远距离噪声
+    minimum_time_interval: 0.3  # 两次处理激光之间的最小时间间隔，单位秒；用于限制处理频率，避免计算负载过高
+    transform_timeout: 0.2  # 查询 TF 变换的超时时间，单位秒；超过该时间仍拿不到坐标变换就可能跳过该帧数据
+    tf_buffer_duration: 30.  # TF 缓存时长，单位秒；缓存越长越能处理延迟数据，但会占用更多内存
+    stack_size_to_use: 40000000 #// program needs a larger stack size to serialize large maps  # 程序使用的栈大小，单位字节；大地图序列化时需要更大的栈空间，原注释说明用于支持大地图序列化
+    enable_interactive_mode: true  # 是否启用交互模式；true 允许通过交互工具/服务调整或手动辅助建图流程
 
-    # General Parameters
-    use_scan_matching: true
-    use_scan_barycenter: true
-    minimum_travel_distance: 1.0
-    minimum_travel_heading: 0.1
-    scan_buffer_size: 10
-    scan_buffer_maximum_scan_distance: 10.0
-    link_match_minimum_response_fine: 0.1
-    link_scan_maximum_distance: 1.5
-    loop_search_maximum_distance: 3.0
-    do_loop_closing: true
-    loop_match_minimum_chain_size: 10
-    loop_match_maximum_variance_coarse: 3.0
-    loop_match_minimum_response_coarse: 0.35
-    loop_match_minimum_response_fine: 0.45
+    # General Parameters  # 建图与扫描匹配的通用参数；影响何时添加关键帧、如何匹配激光、是否做回环检测
+    use_scan_matching: true  # 是否启用扫描匹配；true 表示使用激光数据修正位姿，提高建图精度并降低纯里程计漂移影响
+    use_scan_barycenter: true  # 是否使用扫描点重心参与匹配计算；有助于改善扫描匹配的初始估计或匹配稳定性
+    minimum_travel_distance: 1.0  # 机器人移动超过该距离后才考虑加入新的扫描节点/关键帧，单位米；数值越大地图节点越少但细节可能减少
+    minimum_travel_heading: 0.1  # 机器人旋转超过该角度后才考虑加入新的扫描节点/关键帧，单位弧度；用于控制转向时的建图更新频率
+    scan_buffer_size: 10  # 扫描缓存数量；用于保存最近的激光帧参与局部匹配，数值越大可用历史信息越多但计算/内存开销增加
+    scan_buffer_maximum_scan_distance: 10.0  # 扫描缓存中允许参与匹配的最大距离范围，单位米；限制过远历史扫描对当前匹配的影响
+    link_match_minimum_response_fine: 0.1  # 细匹配建立相邻扫描链接的最低响应值；响应越高代表匹配越可信，低于该值可能认为匹配质量不足
+    link_scan_maximum_distance: 1.5  # 相邻扫描建立链接允许的最大距离，单位米；超过该距离通常不再认为两帧适合直接匹配
+    loop_search_maximum_distance: 3.0  # 回环搜索的最大距离，单位米；只在当前位置附近该范围内寻找可能的历史回环候选
+    do_loop_closing: true  # 是否启用回环检测与回环闭合；true 可在机器人回到旧区域时修正累计漂移，提高全局地图一致性
+    loop_match_minimum_chain_size: 10  # 回环候选链的最小长度；要求连续足够多的匹配节点才接受回环，降低误回环概率
+    loop_match_maximum_variance_coarse: 3.0  # 粗匹配允许的最大方差；方差越大表示不确定性越高，超过该值的回环候选会被拒绝
+    loop_match_minimum_response_coarse: 0.35  # 回环粗匹配最低响应值；粗匹配阶段低于该值说明候选不够可信
+    loop_match_minimum_response_fine: 0.45  # 回环细匹配最低响应值；细匹配阶段要求更高响应，以保证最终回环约束质量
 
-    # Correlation Parameters - Correlation Parameters
-    correlation_search_space_dimension: 0.5
-    correlation_search_space_resolution: 0.01
-    correlation_search_space_smear_deviation: 0.1
+    # Correlation Parameters - Correlation Parameters  # 普通扫描相关匹配参数；控制局部搜索窗口、搜索精度和相关性平滑范围
+    correlation_search_space_dimension: 0.5  # 普通扫描匹配的平移搜索窗口尺寸，单位米；数值越大容错越强但计算量越高
+    correlation_search_space_resolution: 0.01  # 普通扫描匹配搜索分辨率，单位米；数值越小搜索越精细但计算更慢
+    correlation_search_space_smear_deviation: 0.1  # 相关性涂抹/平滑标准差，单位通常为米；用于让匹配评分对小误差更平滑，提高鲁棒性
 
-    # Correlation Parameters - Loop Closure Parameters
-    loop_search_space_dimension: 8.0
-    loop_search_space_resolution: 0.05
-    loop_search_space_smear_deviation: 0.03
+    # Correlation Parameters - Loop Closure Parameters  # 回环检测相关匹配参数；通常搜索范围比普通匹配更大，以寻找历史位置
+    loop_search_space_dimension: 8.0  # 回环匹配的搜索窗口尺寸，单位米；较大范围便于在累计漂移后仍找到回环，但计算量更高
+    loop_search_space_resolution: 0.05  # 回环匹配搜索分辨率，单位米；控制回环搜索网格步长，越小越精细但越耗时
+    loop_search_space_smear_deviation: 0.03  # 回环相关性涂抹/平滑标准差；影响回环匹配评分对位姿误差的容忍度
 
-    # Scan Matcher Parameters
-    distance_variance_penalty: 0.5
-    angle_variance_penalty: 1.0
+    # Scan Matcher Parameters  # 扫描匹配器惩罚项和角度搜索参数；影响匹配结果对距离/角度偏差的偏好
+    distance_variance_penalty: 0.5  # 距离方差惩罚权重；数值越大越不鼓励匹配结果相对预测位姿产生较大平移偏差
+    angle_variance_penalty: 1.0  # 角度方差惩罚权重；数值越大越不鼓励匹配结果相对预测位姿产生较大旋转偏差
 
-    fine_search_angle_offset: 0.00349
-    coarse_search_angle_offset: 0.349
-    coarse_angle_resolution: 0.0349
-    minimum_angle_penalty: 0.9
-    minimum_distance_penalty: 0.5
-    use_response_expansion: true
+    fine_search_angle_offset: 0.00349  # 细搜索角度偏移范围，单位弧度；约等于 0.2 度，用于精细角度匹配
+    coarse_search_angle_offset: 0.349  # 粗搜索角度偏移范围，单位弧度；约等于 20 度，用于较大角度误差下的初步匹配
+    coarse_angle_resolution: 0.0349  # 粗搜索角度分辨率，单位弧度；约等于 2 度，决定粗匹配角度搜索步长
+    minimum_angle_penalty: 0.9  # 最小角度惩罚因子；用于限制角度偏差对匹配评分的最低惩罚程度
+    minimum_distance_penalty: 0.5  # 最小距离惩罚因子；用于限制平移偏差对匹配评分的最低惩罚程度
+    use_response_expansion: true  # 是否启用响应扩展；true 时会扩展/增强匹配响应搜索，有助于提高匹配稳定性

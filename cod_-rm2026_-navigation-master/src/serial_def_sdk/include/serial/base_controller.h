@@ -88,9 +88,13 @@ private:
     rclcpp::Subscription<def_msg::msg::CommonControl>::SharedPtr common_control_sub;
     rclcpp::Subscription<example_interfaces::msg::Float32>::SharedPtr spin_sub;
     bool override_gimbal_ = false;  // 默认不接管（正常自瞄模式）
+    bool override_chassis_ = false; // 默认不接管底盘（正常导航模式），true=遥控器接管
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr mux_service_;
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr chassis_override_service_;
     void mux_service_callback(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
                               std::shared_ptr<std_srvs::srv::SetBool::Response> response);
+    void chassis_override_callback(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+                                   std::shared_ptr<std_srvs::srv::SetBool::Response> response);
     std::atomic<float> current_spin_speed{0.0f};  // M3修复: 改为原子类型
 public:
     BaseController(string name):Node(name)
@@ -199,6 +203,10 @@ public:
         mux_service_ = this->create_service<std_srvs::srv::SetBool>(
             "gimbal_override",
             std::bind(&BaseController::mux_service_callback, this, _1, _2));
+
+        chassis_override_service_ = this->create_service<std_srvs::srv::SetBool>(
+            "chassis_override",
+            std::bind(&BaseController::chassis_override_callback, this, _1, _2));
 
         // 2. 恢复固定频率发送（推荐 50Hz 即 20ms，或者你原本写的 100ms）
         auto fix_send_callback = [this]() -> void {

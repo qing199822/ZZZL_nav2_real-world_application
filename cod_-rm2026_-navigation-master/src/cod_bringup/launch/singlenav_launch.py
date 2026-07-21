@@ -41,9 +41,9 @@ def generate_launch_description():
                 parameters=[{
                     'input_topic': '/livox/lidar',
                     'output_topic': '/livox/lidar_filtered',
-                    'min_x': -0.25, 'max_x': 0.4,
-                    'min_y': -0.25, 'max_y': 0.45,
-                    'min_z': -0.4, 'max_z': 0.25,
+                    'min_x': -0.2, 'max_x': 0.2,
+                    'min_y': -0.2, 'max_y': 0.4,
+                    'min_z': -0.1, 'max_z': 0.2,
                     'negative': True,   # 挖掉车身
                     'leaf_size': 0.05   # 降采样
                 }]
@@ -98,7 +98,7 @@ def generate_launch_description():
                     "--y", "0.0",
                     "--z", "0.15",
                     "--roll", "0.0",
-                    "--pitch", "0.7854",   # Pitch +45°: LiDAR前倾
+                    "--pitch", "0.7854",  # Pitch +45°: LiDAR前倾
                     "--yaw", "0.0",
                     "--frame-id", "base_link",
                     "--child-frame-id", "livox_frame",
@@ -126,7 +126,7 @@ def generate_launch_description():
             ),
             # =================================================================
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','navigation_launch.py')),
+                PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','localization_launch.py')),
                 launch_arguments={
                                   'use_sim_time': "false",
                                   'autostart': "true",
@@ -136,7 +136,7 @@ def generate_launch_description():
                                   'container_name': 'nav2_container'}.items()
             ),
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','localization_launch.py')),
+                PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','navigation_launch.py')),
                 launch_arguments={
                                   'use_sim_time': "false",
                                   'autostart': "true",

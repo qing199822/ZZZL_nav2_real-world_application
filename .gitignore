@@ -19,31 +19,9 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# ROS bags / logs
-*.bag
-*.db3
-bags/
-logs/
-
-# Large binary files
-*.pcd
-*.stl
-
-# Environment
-.env
-*.env.local
-
-# Composer / Claude
-.composer/
+# Claude
 .claude/
 
-# Data (images, recordings)
-data/
-
-# Backup
-*~
-*.bak
-
-# Temp
-tmp/
-*.tmp
+# Temp files
+/tmp/
+*.log

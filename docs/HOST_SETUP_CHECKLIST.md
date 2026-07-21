@@ -6,12 +6,142 @@
 
 ---
 
-## 检查清单速览
+## 快速重建 (迁移到新电脑)
 
-| 步骤 | 内容 | 必做 | 耗时 |
-|------|------|------|------|
-| 1 | ROS2 Humble 安装 | ✅ | 15min |
-| 2 | 系统服务清理 | ✅ | 2min |
+> 已拷贝整个项目目录到新机器后，按以下步骤重建。
+
+### 一、安装 ROS2 Humble
+
+```bash
+sudo apt update && sudo apt install -y curl gnupg lsb-release
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+  -o /usr/share/keyrings/ros-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+  http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" \
+  | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+sudo apt update && sudo apt install -y ros-humble-desktop python3-colcon-common-extensions
+```
+
+### 二、安装项目依赖
+
+```bash
+sudo apt install -y \
+  ros-humble-nav2-bringup \
+  ros-humble-slam-toolbox \
+  ros-humble-tf2-ros \
+  ros-humble-tf2-geometry-msgs \
+  ros-humble-xacro \
+  ros-humble-joint-state-publisher \
+  ros-humble-robot-state-publisher \
+  ros-humble-pointcloud-to-laserscan \
+  ros-humble-ros-gz-bridge \
+  ros-humble-ros-gz-sim \
+  ros-humble-realsense2-camera \
+  python3-rosdep
+
+# 初始化 rosdep
+sudo rosdep init
+rosdep update
+
+# 进入工作空间, 自动补全缺失依赖
+cd ~/ZZZL_nav2_real-world_application/cod_-rm2026_-navigation-master
+rosdep install --from-paths src --ignore-src -r -y
+```
+
+### 三、清理系统干扰
+
+```bash
+sudo apt purge -y modemmanager brltty libbrlapi0.8 python3-brlapi
+sudo usermod -a -G dialout $USER
+# ⚠ 重新登录使 dialout 组生效
+```
+
+### 四、构建
+
+```bash
+cd ~/ZZZL_nav2_real-world_application/cod_-rm2026_-navigation-master
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+# 期望输出: 16 packages finished
+```
+
+### 五、环境变量
+
+在 `~/.bashrc` 末尾追加:
+
+```bash
+# COD 导航项目
+source /opt/ros/humble/setup.bash
+source ~/ZZZL_nav2_real-world_application/cod_-rm2026_-navigation-master/install/setup.bash
+export GZ_SIM_RESOURCE_PATH=$GZ_SIM_RESOURCE_PATH:~/ZZZL_nav2_real-world_application/cod_-rm2026_-navigation-master/src/cod_gazebo_simulator/resource
+```
+
+然后 `source ~/.bashrc`。
+
+### 六、验证
+
+```bash
+# ROS2 环境
+ros2 --version
+
+# 包列表 (应包含 serial_def_sdk, cod_gazebo_simulator, cod_bringup 等)
+ros2 pkg list | grep -E 'serial_def_sdk|cod_gazebo|cod_bringup|small_point_lio'
+
+# 串口设备 (MCU 需已连接)
+ls -la /dev/cod_mcu || ls -la /dev/ttyACM*
+```
+
+### 真机模式 — 额外步骤
+
+```bash
+# Livox SDK2 (系统级)
+cd ~ && git clone https://github.com/Livox-SDK/Livox-SDK2.git
+cd Livox-SDK2 && mkdir build && cd build
+cmake .. && make -j$(nproc) && sudo make install && sudo ldconfig
+
+# livox_ros_driver2 (工作空间内, 已随项目拷贝, 需重新构建)
+cd ~/ZZZL_nav2_real-world_application/cod_-rm2026_-navigation-master
+colcon build --packages-select livox_ros_driver2 --cmake-args -DROS_EDITION=ROS2 -DDISTRO_ROS=humble
+
+# 雷达网络
+sudo nmcli connection add type ethernet ifname enp5s0 con-name Livox-MID360 ip4 192.168.1.50/24
+sudo nmcli connection modify Livox-MID360 ipv4.never-default yes
+sudo nmcli connection up Livox-MID360
+
+# udev 规则 (MCU 串口固定名)
+sudo cp config/99-cod-mcu-serial.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+### 仿真模式 — 额外步骤
+
+```bash
+sudo apt install -y ignition-fortress
+ign gazebo --version
+```
+
+### 工作空间包清单 (16 个)
+
+| 包名 | 用途 |
+|------|------|
+| `cod_bringup` | 导航启动 (launch + config) |
+| `cod_gazebo_simulator` | Gazebo 仿真 (worlds + models + maps + bridge) |
+| `cpp_lidar_filter` | Livox 点云裁剪 |
+| `def_msg` | 自定义消息定义 |
+| `fake_vel_transform` | 坐标系速度变换 (base_link→base_link_fake) |
+| `goal_approach_controller` | Nav2 目标逼近控制器 |
+| `livox_ros_driver2` | Livox MID-360 ROS2 驱动 |
+| `pb_nav2_plugins` | Nav2 行为树插件 |
+| `pb_omni_pid_pursuit_controller` | 全向 PID 追踪控制器 |
+| `pb_rm_interfaces` | 比赛接口定义 |
+| `pointcloud_to_laserscan` | 3D 点云→2D 激光 |
+| `ros2_simple_serial` | 旧串口模块 (已废弃, 未在 launch 中引用) |
+| `serial_def_sdk` | 新 Seasky 串口通信 (核心) |
+| `small_point_lio` | 激光惯性里程计 (LIO) |
+| `vision_msg` | 视觉消息定义 |
+| `waypoint_editor` | 航点编辑器 |
+
+---
 | 3 | 用户权限 | ✅ | 1min |
 | 4 | udev 规则 (MCU 串口固定名) | ✅ | 3min |
 | 5 | Livox 雷达网络 | ✅ | 5min |

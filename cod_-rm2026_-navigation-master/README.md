@@ -23,7 +23,8 @@
 ├── pb_nav2_plugins                 #Navigation2插件库，控制机器人执行后退行为
 ├── pb_omni_pid_pursuit_controller  #PID控制器
 ├── pointcloud_to_laserscan         #点云转换，pointcloud->laserscan
-├── ros2_simple_serial              #串口通信
+├── serial_def_sdk                  #Seasky 串口通信
+├── slam_dynamic_filter             #SLAM 动态障碍过滤
 ├── small_point_lio                 #point_lio提供里程计，odom->base_link
 └── waypoint_editor                 #多点航点编辑
 ```
@@ -73,5 +74,4 @@
   - 该导航程序详细解说教程可关注b站
   【RM COD导航分享一】 https://www.bilibili.com/video/BV1XSXZBUEYL/?share_source=copy_web&vd_source=d111e9a34ed9fbf816fa2277f4e3d017
   【RM COD导航分享二 loopback sim和waypoint editor】 https://www.bilibili.com/video/BV1r79cBME6Y/?share_source=copy_web&vd_source=d111e9a34ed9fbf816fa2277f4e3d017
-
 

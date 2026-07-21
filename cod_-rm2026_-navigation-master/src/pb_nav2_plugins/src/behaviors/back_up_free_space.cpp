@@ -85,18 +85,23 @@ nav2_behaviors::Status BackUpFreeSpace::onRun(
   pose.theta = tf2::getYaw(initial_pose_.pose.orientation);
 
   // Find the best direction to back up
-  float best_angle = findBestDirection(costmap, pose, -M_PI, M_PI, max_radius_, M_PI / 32.0);
+  const auto best_angle = findBestDirection(
+    costmap, pose, -M_PI, M_PI, max_radius_, M_PI / 32.0);
+  if (!best_angle) {
+    RCLCPP_ERROR(logger_, "No collision-free backup direction is available.");
+    return nav2_behaviors::Status::FAILED;
+  }
 
   // Calculate move command
-  twist_x_ = std::cos(best_angle) * command->speed;
-  twist_y_ = std::sin(best_angle) * command->speed;
+  twist_x_ = std::cos(*best_angle) * command->speed;
+  twist_y_ = std::sin(*best_angle) * command->speed;
   command_x_ = command->target.x;
   command_time_allowance_ = command->time_allowance;
 
   end_time_ = clock_->now() + command_time_allowance_;
 
   RCLCPP_WARN(
-    logger_, "backing up %f meters towards free space at angle %f", command_x_, best_angle);
+    logger_, "backing up %f meters towards free space at angle %f", command_x_, *best_angle);
 
   return nav2_behaviors::Status::SUCCEEDED;
 }
@@ -152,17 +157,14 @@ nav2_behaviors::Status BackUpFreeSpace::onCycleUpdate()
   return nav2_behaviors::Status::RUNNING;
 }
 
-float BackUpFreeSpace::findBestDirection(
+std::optional<float> BackUpFreeSpace::findBestDirection(
   const nav2_msgs::msg::Costmap & costmap, geometry_msgs::msg::Pose2D pose, float start_angle,
   float end_angle, float radius, float angle_increment)
 {
-  float best_angle = start_angle;
-
-  float first_safe_angle = -1.0f;
-  float last_unsafe_angle = -1.0f;
-
-  float final_safe_angle = 0.0f;
-  float final_unsafe_angle = 0.0f;
+  std::optional<float> first_safe_angle;
+  std::optional<float> final_safe_angle;
+  float final_safe_end = start_angle;
+  float widest_safe_sector = -1.0f;
 
   float resolution = costmap.metadata.resolution;
   float origin_x = costmap.metadata.origin.position.x;
@@ -200,27 +202,39 @@ float BackUpFreeSpace::findBestDirection(
         break;
       }
     }
-    if (is_safe && first_safe_angle == -1.0f) {
+    if (is_safe && !first_safe_angle) {
       first_safe_angle = angle;
     }
 
-    if (!is_safe && first_safe_angle != -1.0f && last_unsafe_angle == -1.0f) {
-      last_unsafe_angle = angle;
-    }
-
-    if (
-      last_unsafe_angle - first_safe_angle > final_unsafe_angle - final_safe_angle &&
-      first_safe_angle != -1.0f && last_unsafe_angle != -1.0f) {
-      final_safe_angle = first_safe_angle;
-      final_unsafe_angle = last_unsafe_angle;
-      first_safe_angle = -1.0f;
-      last_unsafe_angle = -1.0f;
+    if (!is_safe && first_safe_angle) {
+      const float safe_end = angle - angle_increment;
+      const float width = safe_end - *first_safe_angle;
+      if (width > widest_safe_sector) {
+        widest_safe_sector = width;
+        final_safe_angle = *first_safe_angle;
+        final_safe_end = safe_end;
+      }
+      first_safe_angle.reset();
     }
   }
-  best_angle = (final_safe_angle + final_unsafe_angle) / 2.0f;
+
+  if (first_safe_angle) {
+    const float width = end_angle - *first_safe_angle;
+    if (width > widest_safe_sector) {
+      widest_safe_sector = width;
+      final_safe_angle = *first_safe_angle;
+      final_safe_end = end_angle;
+    }
+  }
+
+  if (!final_safe_angle) {
+    return std::nullopt;
+  }
+
+  const float best_angle = (*final_safe_angle + final_safe_end) / 2.0f;
 
   if (visualize_) {
-    visualize(pose, radius, final_safe_angle, final_unsafe_angle);
+    visualize(pose, radius, *final_safe_angle, final_safe_end);
   }
 
   return best_angle;

@@ -63,6 +63,8 @@ def generate_launch_description():
                 parameters=[{
                     'input_topic': '/livox/lidar',
                     'output_topic': '/livox/lidar_filtered',
+                    'crop_frame': 'base_link',
+                    'transform_tolerance': 0.1,
                     'min_x': -0.2, 'max_x': 0.2,
                     'min_y': -0.2, 'max_y': 0.4,
                     'min_z': -0.1, 'max_z': 0.2,
@@ -88,12 +90,12 @@ def generate_launch_description():
             Node(
                 package='pointcloud_to_laserscan', executable='pointcloud_to_laserscan_node',
                 condition=filter_disabled_condition(),
-                remappings=[('cloud_in',  '/livox/lidar'),
+                remappings=[('cloud_in',  '/livox/lidar_filtered'),
                             ('scan', '/scan')],
                 parameters=[{
                     'target_frame': 'base_link',
                     'transform_tolerance': 0.5,
-                    'min_height': 0.1,
+                    'min_height': 0.05,
                     'max_height': 1.00,
                     'angle_min': -3.1416,  # -M_PI/2
                     'angle_max': 3.1416,  # M_PI/2
@@ -165,8 +167,7 @@ def generate_launch_description():
                     "odom",
                 ],
             ),
-            # M4修复: 添加 livox_frame -> base_link 静态TF
-            # 请根据实际雷达安装位置修改 --x/--y/--z 参数
+            # Measured MID-360 optical origin: 0.46 m above base_link ground plane.
             Node(
                 package="tf2_ros",
                 executable="static_transform_publisher",
@@ -174,7 +175,7 @@ def generate_launch_description():
                 arguments=[
                     "--x", "0.0",
                     "--y", "0.0",
-                    "--z", "0.15",
+                    "--z", "0.46",
                     "--roll", "0.0",
                     "--pitch", "0.7854",   # Pitch +45°: LiDAR前倾
                     "--yaw", "0.0",
@@ -188,7 +189,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[{"use_sim_time": use_sim_time}],
             ),
-            # ========== 替换：RMserial-main 替代 ros2_simple_serial ==========
+            # Seasky serial transport
             Node(
                 package='serial_def_sdk',
                 executable='uart',
@@ -202,7 +203,6 @@ def generate_launch_description():
                     ('/hardware/cmd_vel_api', '/aft_cmd_vel'),
                 ],
             ),
-            # =================================================================
             # TODO: 暂时注释 — 真机未安装 realsense2_camera，仅验证雷达管线
             # IncludeLaunchDescription(
             #     PythonLaunchDescriptionSource(

@@ -4,7 +4,16 @@
 
 set -e
 
-WORKSPACE="$HOME/ZZZL_nav2_real-world_application/cod_-rm2026_-navigation-master"
+WORKSPACE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+LIVOX_PID=""
+
+cleanup() {
+    if [ -n "$LIVOX_PID" ] && kill -0 "$LIVOX_PID" 2>/dev/null; then
+        kill "$LIVOX_PID" 2>/dev/null || true
+        wait "$LIVOX_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
 
 echo "========================================="
 echo "  COD 导航系统启动"
@@ -21,7 +30,8 @@ else
     if ping -c 1 -W 2 192.168.1.181 &>/dev/null; then
         echo "  雷达网络连通 ✅"
     else
-        echo "  ⚠ 雷达网络不通，请检查网线"
+        echo "  雷达网络不通，请检查网线，导航未启动"
+        exit 1
     fi
 fi
 
@@ -33,7 +43,8 @@ elif [ -e /dev/ttyACM0 ]; then
     sudo ln -sf /dev/ttyACM0 /dev/cod_mcu
     echo "  已创建 /dev/cod_mcu ✅"
 else
-    echo "  ⚠ MCU 未连接"
+    echo "  MCU 未连接，导航未启动"
+    exit 1
 fi
 
 # 3. 加载环境
@@ -49,18 +60,23 @@ LIVOX_PID=$!
 sleep 5
 
 # 检查驱动是否成功启动
-if ! kill -0 $LIVOX_PID 2>/dev/null; then
+if ! kill -0 "$LIVOX_PID" 2>/dev/null; then
     echo "  ❌ 雷达驱动启动失败"
     exit 1
 fi
 echo "  雷达驱动已启动 (PID: $LIVOX_PID)"
 
+echo "  等待 /livox/lidar 实际点云..."
+if ! timeout 10 ros2 topic echo --once /livox/lidar sensor_msgs/msg/PointCloud2 >/dev/null 2>&1; then
+    echo "  雷达驱动进程存在，但 10 秒内未收到点云，导航未启动"
+    exit 1
+fi
+echo "  雷达点云已就绪"
+
 # 5. 启动导航(前台)
 echo "  启动导航栈..."
 ros2 launch cod_bringup singlenav_launch.py
 
-# 导航退出后，清理雷达驱动
+# 导航退出后，由 EXIT trap 清理雷达驱动
 echo "导航已退出，清理..."
-kill $LIVOX_PID 2>/dev/null || true
-wait $LIVOX_PID 2>/dev/null || true
 echo "完成。"

@@ -37,10 +37,11 @@
 
 ```
 [Livox MID-360 激光雷达] → 感知环境，获取点云
-[Realsense 深度相机]     → 近距离避障
 [MCU (单片机)]          → 接收速度指令，驱动电机
 [工控机 (你的电脑)]      → 运行本项目的所有代码
 ```
+
+当前真机未安装 RealSense，导航障碍物观测源只有 MID-360。雷达光心离地 `0.46m`、前倾 `+0.7854rad`，软件以 `base_link` 的 z=0 为地面基准。
 
 ### 1.3 软件架构总览（16 个包）
 
@@ -79,7 +80,7 @@
 | `goal_approach_controller` | Nav2控制器wrapper，目标接近减速 | C++ |
 | `pb_omni_pid_pursuit_controller` | 全向底盘PID路径追踪 | C++ |
 | `pb_nav2_plugins` | 后退行为 + 强度体素层 | C++ |
-| `ros2_simple_serial` | 旧串口模块（已弃用） | C++ |
+| `slam_dynamic_filter` | SLAM 动态障碍过滤 | Python |
 | `def_msg` | 自定义ROS消息定义 | CMake |
 | `vision_msg` | 视觉消息定义 | CMake |
 | `pb_rm_interfaces` | 裁判系统接口定义 | CMake |
@@ -106,7 +107,7 @@ install(
 
 ### 2.2 单点导航启动文件：`singlenav_launch.py`
 
-这个文件启动的是**单点导航模式**（已有地图，用AMCL定位）。
+这个文件启动的是**单点导航模式**（加载已有地图，以 LIO 提供 `odom→base_link`，固定 `map→odom`；不启动 AMCL）。
 
 ```python
 # 关键导入
@@ -137,6 +138,7 @@ Node(
     parameters=[{
         'input_topic': '/livox/lidar',       # 输入: 原始雷达点云
         'output_topic': '/livox/lidar_filtered', # 输出: 过滤后的点云
+        'crop_frame': 'base_link',           # 先变换到机体/地面坐标系再裁剪
         'min_x': -0.2, 'max_x': 0.2,         # 裁剪盒子参数
         'min_y': -0.2, 'max_y': 0.4,
         'min_z': -0.1, 'max_z': 0.2,
@@ -180,13 +182,14 @@ Node(
 ```
 
 ```python
-# livox_frame→base_link 静态TF
+# base_link→livox_frame 静态TF
 Node(
     package="tf2_ros",
     executable="static_transform_publisher",
     name="livox_to_base_link",
     arguments=[
-        "--x", "0.0", "--y", "0.0", "--z", "0.15",  # 雷达在底盘上方 15cm
+        "--x", "0.0", "--y", "0.0", "--z", "0.46",  # 雷达光心离地 46cm
+        "--pitch", "0.7854",                         # 前倾 45°
         "--frame-id", "base_link", "--child-frame-id", "livox_frame",
     ],
 ),
@@ -217,15 +220,15 @@ Node(
 ```
 
 **`/hardware/cmd_vel_api` → `/aft_cmd_vel` 是数据流的核心链路！**
-- Nav2 输出速度指令 → `cmd_vel`
-- `fake_vel_transform` 接收 `cmd_vel` → 输出 `aft_cmd_vel`
+- Nav2 输出依次经过速度平滑、Collision Monitor 和 LiDAR 新鲜度看门狗 → `cmd_vel`
+- `fake_vel_transform` 接收安全门控后的 `cmd_vel` → 输出 `aft_cmd_vel`
 - `serial_def_sdk` 接收 `aft_cmd_vel` → 发送给 MCU
 
 ### 2.3 多点导航 vs 单点导航的区别
 
 | 特性 | singlenav (单点) | multiplenav (多点) |
 |------|-----------------|-------------------|
-| 定位方式 | AMCL (已有地图) | slam_toolbox (同步建图) |
+| 地图对齐 | 固定 map→odom，无 AMCL | 固定 map→odom；slam_toolbox 不发布校正 TF |
 | 参数文件 | singlenav2_params.yaml | multiplenav2_params.yaml |
 | pointcloud_to_laserscan | 不需要 | 需要 (SLAM用2D scan) |
 | auto_save_map | 不需要 | 每30秒自动保存地图 |
@@ -233,7 +236,7 @@ Node(
 
 ### 2.4 Nav2 导航启动文件 `navigation_launch.py`
 
-启动了 7 个核心服务器：
+启动了 8 个生命周期节点、一个独立 LiDAR 命令看门狗和生命周期管理器：
 
 | 服务器 | 作用 |
 |--------|------|
@@ -244,10 +247,14 @@ Node(
 | `bt_navigator` | 行为树导航器 |
 | `waypoint_follower` | 多点巡逻 |
 | `velocity_smoother` | 速度平滑 |
+| `collision_monitor` | 0.55m StopZone 独立停车检查 |
+| `lidar_cmd_watchdog` | 点云超过 0.3s 未更新时持续发布零速度 |
 
 **关键的重映射：**
 - `controller_server` 输出 `cmd_vel_nav` (而非默认的 `cmd_vel`)
-- `velocity_smoother` 接收 `cmd_vel_nav` → 输出 `cmd_vel`
+- `velocity_smoother` 接收 `cmd_vel_nav` → 输出 `cmd_vel_smoothed`
+- `collision_monitor` 输出 `cmd_vel_collision_safe`
+- `lidar_cmd_watchdog` 仅在点云新鲜时转发为 `cmd_vel`
 - `fake_vel_transform` 从 `cmd_vel` 接收 → 输出 `aft_cmd_vel`
 
 ---
@@ -723,30 +730,20 @@ int main(int argc, char* argv[]) {
 }
 ```
 
-### 3.8 旧串口模块 — `ros2_simple_serial`（已弃用）
-
-**旧模块的问题：**
-1. 每次消息打开/关闭串口 → 效率极低
-2. 15字节裸包，无 CRC → 无数据完整性
-3. 只发不收 → 无法获取MCU回传
-4. 简单累加和校验 → 容易出错
-
----
-
 ## 第四章：坐标变换 `fake_vel_transform`
 
-COD 导航项目**最精妙的设计**之一。
+该节点位于安全门控与串口之间，负责可选的场地坐标速度旋转和命令超时清零。
 
 ### 4.1 问题背景
 
-Nav2 在**地图坐标系（map）**下规划。MCU 在**机体坐标系（base_link）**下控制电机。
+当前 Nav2 的 `robot_base_frame` 是真实 `base_link`，控制器输出本来就是机体系速度，因此默认无需额外旋转。
 
 - Map 系：X指北、Y指东，固定
 - 机体系：X指前方、Y指左方，随机器人旋转
 
-### 4.2 解决方案
+### 4.2 当前默认行为
 
-创建虚拟坐标系 `base_link_fake`，航向始终为 0：
+`enable_vel_rotation=false` 时，线速度和上游角速度直接透传。节点仍发布同原点、仅抵消 yaw 的 `base_link_fake`，供以后显式启用场地坐标速度模式时使用；Nav2 当前不使用该帧。
 
 ```cpp
 // odomCallback: 发布 base_link → base_link_fake 的TF
@@ -756,6 +753,9 @@ void FakeVelTransform::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg
     geometry_msgs::msg::TransformStamped t;
     t.header.frame_id = robot_base_frame_;       // 父
     t.child_frame_id = fake_robot_base_frame_;    // 子
+    t.transform.translation.x = 0.0;
+    t.transform.translation.y = 0.0;
+    t.transform.translation.z = 0.0;
     tf2::Quaternion q;
     q.setRPY(0, 0, -current_robot_base_angle_);  // ★ 转负朝向角
     t.transform.rotation = tf2::toMsg(q);
@@ -763,25 +763,25 @@ void FakeVelTransform::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg
 }
 ```
 
-### 4.3 速度变换公式
+### 4.3 速度与超时保护
 
 ```cpp
 void FakeVelTransform::cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
-    float angle_diff = current_robot_base_angle_;
-
     geometry_msgs::msg::Twist aft_tf_vel;
-    // ★ 角速度替换为 spin_speed_ (默认0，MCU差速处理转向)
-    aft_tf_vel.angular.z = spin_speed_;
-    
-    // ★ 旋转矩阵：map系 → 机体系
-    // [ cosθ   sinθ  ] [ vx_map ]
-    // [ -sinθ  cosθ  ] [ vy_map ]
-    aft_tf_vel.linear.x = msg->linear.x * cos(angle_diff) + msg->linear.y * sin(angle_diff);
-    aft_tf_vel.linear.y = -msg->linear.x * sin(angle_diff) + msg->linear.y * cos(angle_diff);
+    aft_tf_vel.angular.z = (spin_speed_ != 0.0) ? spin_speed_ : msg->angular.z;
+    if (enable_vel_rotation_) {
+        aft_tf_vel.linear.x = msg->linear.x * cos(yaw) + msg->linear.y * sin(yaw);
+        aft_tf_vel.linear.y = -msg->linear.x * sin(yaw) + msg->linear.y * cos(yaw);
+    } else {
+        aft_tf_vel.linear.x = msg->linear.x;
+        aft_tf_vel.linear.y = msg->linear.y;
+    }
 
     cmd_vel_chassis_pub_->publish(aft_tf_vel);  // → /aft_cmd_vel
 }
 ```
+
+50ms 定时器检查 `cmd_vel_timeout`（默认 0.5s）；上游命令消失后持续发布零速度。
 
 ---
 
@@ -797,17 +797,12 @@ geometry_msgs::msg::TwistStamped computeVelocityCommands(...) {
 
     double dist = std::hypot(dx, dy);  // 到目标距离
 
-    if (dist < direct_approach_distance_) {       // < 0.5m
-        // ★ 直接驱动模式，绕过MPPI防止画弧
-        double target_speed = std::min(approach_velocity_, dist * direct_approach_kp_);
-        cmd.twist.linear.x = target_speed * (dx / dist);
-        cmd.twist.linear.y = target_speed * (dy / dist);
-        cmd.twist.angular.z = 0.0;
-    } else if (dist < approach_distance_) {       // < 2.5m
-        // ★ 速度钳位
+    if (dist < approach_distance_) {              // < 2.5m
+        // 仅缩放 MPPI 已检查命令的线速度幅值，不覆盖方向
+        double allowed = std::min(approach_velocity_, dist * approach_kp_);
         double speed = std::hypot(cmd.twist.linear.x, cmd.twist.linear.y);
-        if (speed > approach_velocity_) {
-            double scale = approach_velocity_ / speed;
+        if (speed > allowed) {
+            double scale = allowed / speed;
             cmd.twist.linear.x *= scale;
             cmd.twist.linear.y *= scale;
         }
@@ -869,12 +864,22 @@ if (curvature > curvature_min_) {
                        │
                        ▼
             [velocity_smoother]
-              输出: /cmd_vel (平滑后)
+              输出: /cmd_vel_smoothed
+                       │
+                       ▼
+            [collision_monitor]
+              0.55m StopZone
+              输出: /cmd_vel_collision_safe
+                       │
+                       ▼
+            [lidar_cmd_watchdog]
+              点云超时0.3s持续零速
+              输出: /cmd_vel
                        │
                        ▼
          ┌─────────────────────────────┐
          │    fake_vel_transform       │
-         │  map系→机体系旋转            │
+         │  默认透传 + 0.5s命令超时      │
          │  输出: /aft_cmd_vel         │
          └──────────────┬──────────────┘
                         │
@@ -911,7 +916,7 @@ MID-360 雷达 (192.168.1.181)
     │                    [Nav2 定位]
     ├──────────────────┐
     ▼                  ▼
-[STVL voxel层]  [pointcloud_to_laserscan]
+[STVL/Collision Monitor]  [pointcloud_to_laserscan]
     │ 障碍物          │ 3D→2D
     ▼                  ▼
 [local_costmap]    [slam_toolbox]
@@ -939,9 +944,13 @@ crop.setNegative(true);  // ★ 挖掉盒内=车身
 crop.filter(*cloud_cropped);
 ```
 
+实现会先通过 TF 把输入点云变换到 `crop_frame=base_link`，再应用 CropBox；输出点云也标记为 `base_link`。这样前倾 45° 的雷达不会把雷达坐标轴误当成车身坐标轴。
+
 ### 7.2 `pointcloud_to_laserscan` — 3D→2D 转换
 
 遍历点云，按高度/距离/角度过滤，将每个角度上最近的点距离填入 LaserScan：
+
+生产多点模式输入为 `/livox/lidar_filtered`，目标帧为 `base_link`，高度范围 `0.05m..1.00m`。`0.05m` 下限用于覆盖最低离地 `0.10m` 的障碍，并留出地面/标定噪声裕量。
 
 ```cpp
 for (iter_x, iter_y, iter_z) {
@@ -973,7 +982,7 @@ RViz2 插件功能：
 
 ## 第八章：新旧串口协议对比
 
-| 特性 | 旧 `ros2_simple_serial` | 新 `serial_def_sdk` |
+| 特性 | 已移除的旧 `ros2_simple_serial` | 当前 `serial_def_sdk` |
 |------|------------------------|---------------------|
 | 帧格式 | 15 字节裸包 | Seasky 帧 (10+N 字节) |
 | 帧头 | 0xA5 | 0xA5 |
@@ -1120,21 +1129,25 @@ cod_gazebo_simulator/
 
 ```yaml
 local_costmap:
-  robot_base_frame: base_link_fake    # ★ 虚拟坐标系
+  robot_base_frame: base_link         # 当前使用真实机体坐标系
   width: 10m, height: 10m
   resolution: 0.05m
   plugins: [static_layer, stvl_voxel_layer, inflation_layer]
   inflation:
     cost_scaling_factor: 5.0         # 代价快速衰减
     inflation_radius: 0.55m
+  livox_source:
+    min_obstacle_height: 0.05m       # 覆盖最低离地0.10m目标，保留5cm裕量
+    expected_update_rate: 0.3s
 ```
 
 ### 11.5 STVL 观测源
 
 | 源 | 话题 | 范围 | FOV |
 |------|------|------|-----|
-| livox | /livox/lidar_filtered | 8m | 360° |
-| realsense | /camera/.../points | 3m | 87°×58° |
+| livox | /livox/lidar_filtered | 8m | 水平360°，垂直约-7°至+52° |
+
+当前没有 RealSense 观测源。Collision Monitor 同样消费过滤点云，并在 `base_link` 周围设置 0.55m StopZone；独立看门狗负责点云掉线时强制零速。
 
 ---
 
@@ -1158,7 +1171,7 @@ sudo usermod -a -G dialout $USER && newgrp dialout
 
 ### 12.3 导航
 
-**接近目标画弧不停止** → 检查 GoalApproachController 的 direct_approach_distance 参数
+**接近目标速度异常** → 检查 GoalApproachController 的 `approach_distance`、`approach_velocity`、`approach_kp`
 
 **把自己当障碍物** → 检查 cpp_lidar_filter 的 CropBox 参数
 
@@ -1170,12 +1183,12 @@ sudo usermod -a -G dialout $USER && newgrp dialout
 
 ## 总结：项目的精妙之处
 
-1. **`fake_vel_transform`** — 解决 Nav2 map系 和 MCU 机体系不匹配
-2. **`send_merged_control()`** — 话题超时自动清零，任一话题挂都不影响安全
+1. **Collision Monitor + LiDAR watchdog** — 障碍入侵和雷达掉线都能在串口前强制零速
+2. **`send_merged_control()`** — 话题超时明确发送底盘、云台和发射机构零指令
 3. **Seasky 双层 CRC** — CRC-8+CRC-16 双重数据完整性
 4. **SerialDriver 原子 fd + 自动重连** — 支持串口热插拔
 5. **GoalApproachController wrapper** — 不修改Nav2源码的增加接近减速
-6. **base_link_fake 虚拟坐标系** — 全向底盘无缝适配 Nav2
+6. **`fake_vel_transform`** — 默认透传，可选场地坐标旋转，并提供独立命令超时清零
 7. **Gazebo + ros_gz_bridge** — 真机代码 100% 复用的仿真环境
 
 ---

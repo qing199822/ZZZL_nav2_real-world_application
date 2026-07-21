@@ -27,5 +27,10 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(PROGRAMS
+  scripts/lidar_cmd_watchdog.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 
 ament_package()

@@ -7,7 +7,7 @@ bt_navigator:
     global_frame: map
     robot_base_frame: base_link
     odom_topic: /Odometry
-    default_bt_xml_filename: "navigate_to_pose_w_replanning_and_recovery.xml"
+    default_nav_to_pose_bt_xml: "navigate_to_pose_w_replanning_and_recovery.xml"
     plugin_lib_names:
       - nav2_compute_path_to_pose_action_bt_node
       - nav2_follow_path_action_bt_node
@@ -21,25 +21,24 @@ controller_server:
   ros__parameters:
     use_sim_time: True
     controller_frequency: 20.0
-    controller_plugin_ids: ["FollowPath"]
+    controller_plugins: ["FollowPath"]
     FollowPath:
-      plugin: "pb_omni_pid_pursuit_controller::OmniPIDPursuitController"
-      desired_linear_vel: 1.5
-      max_linear_vel: 2.5
-      min_linear_vel: 0.1
-      desired_angular_vel: 1.0
-      max_angular_vel: 2.0
+      plugin: "pb_omni_pid_pursuit_controller::OmniPidPursuitController"
+      translation_kp: 1.5
+      translation_ki: 0.0
+      translation_kd: 0.0
+      rotation_kp: 2.0
+      rotation_ki: 0.0
+      rotation_kd: 0.0
+      v_linear_max: 2.5
+      v_linear_min: -2.5
+      v_angular_max: 2.0
+      v_angular_min: -2.0
       lookahead_dist: 0.5
-      kp_linear: 1.5
-      ki_linear: 0.0
-      kd_linear: 0.0
-      kp_angular: 2.0
-      ki_angular: 0.0
-      kd_angular: 0.0
 
 planner_server:
   ros__parameters:
-    planner_plugin_ids: ["GridBased"]
+    planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_navfn_planner/NavfnPlanner"
       tolerance: 0.5
@@ -50,7 +49,7 @@ local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: True
-      global_frame: map
+      global_frame: odom
       robot_base_frame: base_link
       update_frequency: 5.0
       publish_frequency: 2.0
@@ -78,6 +77,7 @@ local_costmap:
           clearing: True
           marking: True
           data_type: "LaserScan"
+          expected_update_rate: 0.3
 
 global_costmap:
   global_costmap:
@@ -105,6 +105,10 @@ global_costmap:
         lidar_scan:
           topic: /scan
           max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          expected_update_rate: 0.3
 
 behavior_server:
   ros__parameters:
@@ -112,7 +116,7 @@ behavior_server:
     costmap_topic: local_costmap/costmap_raw
     footprint_topic: local_costmap/published_footprint
     cycle_frequency: 10.0
-    behavior_plugin_ids: ["spin", "backup", "wait"]
+    behavior_plugins: ["spin", "backup", "wait"]
     spin:
       plugin: "nav2_behaviors/Spin"
     backup:
@@ -130,12 +134,14 @@ velocity_smoother:
     min_velocity: [-2.5, -2.5, -2.5]
     deadband_velocity: [0.05, 0.05, 0.05]
     velocity_timeout: 1.0
+    max_accel: [2.5, 2.5, 1.5]
+    max_decel: [-3.5, -3.5, -3.0]
     odom_topic: "/Odometry"
 
 smoother_server:
   ros__parameters:
     use_sim_time: True
-    smoother_plugin_ids: ["simple_smoother"]
+    smoother_plugins: ["simple_smoother"]
     simple_smoother:
       plugin: "nav2_smoother::SimpleSmoother"
       tolerance: 1.0e-10
@@ -145,6 +151,39 @@ waypoint_follower:
   ros__parameters:
     use_sim_time: True
 
-amcl:
+collision_monitor:
   ros__parameters:
     use_sim_time: True
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "cmd_vel_smoothed"
+    cmd_vel_out_topic: "cmd_vel_collision_safe"
+    transform_tolerance: 0.1
+    source_timeout: 0.3
+    base_shift_correction: True
+    stop_pub_timeout: 2.0
+    polygons: ["StopZone"]
+    StopZone:
+      type: "polygon"
+      points: [0.55, 0.55, 0.55, -0.55, -0.55, -0.55, -0.55, 0.55]
+      action_type: "stop"
+      max_points: 1
+      visualize: True
+      polygon_pub_topic: "collision_monitor/stop_zone"
+      enabled: True
+    observation_sources: ["livox"]
+    livox:
+      type: "pointcloud"
+      topic: "/livox/lidar_filtered"
+      min_height: 0.05
+      max_height: 1.0
+      enabled: True
+
+lidar_cmd_watchdog:
+  ros__parameters:
+    use_sim_time: True
+    cloud_topic: "/livox/lidar_filtered"
+    cmd_vel_in_topic: "cmd_vel_collision_safe"
+    cmd_vel_out_topic: "cmd_vel"
+    cloud_timeout: 0.3
+    check_rate: 20.0

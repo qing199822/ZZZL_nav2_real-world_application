@@ -4,7 +4,7 @@ COD RM2026 Gazebo 定位仿真 (修复版)
 启动: Gazebo → 机器人 → AMCL定位 → Nav2 → RViz
 
 C1+M6修复: xacro→URDF, robot_description传参
-C2修复:   添加 livox_frame 静态TF
+C2修复:   livox_frame TF由robot_state_publisher唯一发布
 C3修复:   添加 AMCL 定位
 M2修复:   地图跟随 world 参数
 
@@ -70,13 +70,6 @@ def setup_launch(context, *args, **kwargs):
         Node(package="robot_state_publisher", executable="robot_state_publisher",
              parameters=[{"use_sim_time": True, "robot_description": robot_desc}]),
     ])
-    livox_tf = Node(
-        package="tf2_ros", executable="static_transform_publisher",
-        arguments=["--x", "0.0", "--y", "0.0", "--z", "0.15",
-                   "--roll", "0.0", "--pitch", "0.7854", "--yaw", "0.0",   # Pitch +45°: LiDAR前倾
-                   "--frame-id", "base_link", "--child-frame-id", "livox_frame"],
-    )
-
     # 4. 传感器桥接
     bridge_cfg = os.path.join(pkg_sim, "config", "gz_bridge.yaml")
     gz_bridge = TimerAction(period=6.0, actions=[
@@ -84,11 +77,18 @@ def setup_launch(context, *args, **kwargs):
              parameters=[{"config_file": bridge_cfg}]),
     ])
 
+    lidar_filter = TimerAction(period=7.0, actions=[
+        Node(package="cpp_lidar_filter", executable="lidar_filter_node",
+             parameters=[{"use_sim_time": True, "crop_frame": "base_link",
+                          "input_topic": "/livox/lidar",
+                          "output_topic": "/livox/lidar_filtered"}]),
+    ])
+
     # 5. pointcloud→laserscan
-    pcl2scan = TimerAction(period=7.0, actions=[
+    pcl2scan = TimerAction(period=8.0, actions=[
         Node(package="pointcloud_to_laserscan", executable="pointcloud_to_laserscan_node",
-             remappings=[("cloud_in", "/livox/lidar"), ("scan", "/scan")],
-             parameters=[{"target_frame": "base_link", "min_height": -0.3,
+             remappings=[("cloud_in", "/livox/lidar_filtered"), ("scan", "/scan")],
+             parameters=[{"target_frame": "base_link", "min_height": 0.05,
                          "max_height": 1.0, "range_min": 0.3, "range_max": 40.0,
                          "use_inf": True, "use_sim_time": True}]),
     ])
@@ -135,7 +135,7 @@ def setup_launch(context, *args, **kwargs):
              condition=IfCondition(LaunchConfiguration("use_rviz"))),
     ])
 
-    return [gazebo, clock_bridge, spawn, rsp, livox_tf, gz_bridge,
+    return [gazebo, clock_bridge, spawn, rsp, gz_bridge, lidar_filter,
             pcl2scan, map_server, nav2, rviz]
 
 

@@ -41,20 +41,6 @@ void BaseController::control2serial(const def_msg::msg::CommonControl::UniquePtr
 }
 
 void BaseController::send_merged_control() {
-  // M2修复: 使用成员变量替代静态变量，支持生命周期管理
-  // has_ever_received 和 init_*_time 在构造时初始化
-
-  // 初始拦截锁：在收到任何第一条消息之前，绝对保持静默，不发数据
-  if (!has_ever_received_) {
-      if (last_cmd_time_ != init_cmd_time_ || 
-          last_gimbal_time_ != init_gimbal_time_ || 
-          last_spin_time_ != init_spin_time_) {
-          has_ever_received_ = true; // 终于收到消息了，解除拦截锁！
-      } else {
-          return; // 还没收到过任何消息，静悄悄地退出
-      }
-  }
-
   auto current_time = this->get_clock()->now();
 
   // R1修复: 使用可配置的话题超时参数 (默认100ms)
@@ -63,17 +49,6 @@ void BaseController::send_merged_control() {
   bool gimbal_alive = (current_time - last_gimbal_time_).seconds() <= timeout_sec;
   bool spin_alive = (current_time - last_spin_time_).seconds() <= timeout_sec;
 
-  // ====================================================================
-  // 【核心满足你的要求】：如果所有被订阅的话题都超时“死掉”了，直接停止发送！
-  // ====================================================================
-  if (!cmd_alive && !gimbal_alive && !spin_alive) {
-      return; 
-  }
-
-  // ====================================================================
-  // 走到这里，说明【至少有一个】话题还在正常发送，那我们就拼包把它发出去
-  // ====================================================================
-  
   // (1) 检查底盘是否阵亡，如果底盘挂了而云台还在，底盘数据清零
   if (!cmd_alive) {
       fix_control_send.vx = 0.0;
@@ -105,7 +80,7 @@ void BaseController::send_merged_control() {
   }
 
   // 4. 执行串口发送
-  RCLCPP_INFO(this->get_logger(), 
+  RCLCPP_DEBUG(this->get_logger(),
       "发送串口数据 -> [底盘] vx:%.2f vy:%.2f vz:%.2f spin:%.2f | [云台] yaw:%.2f pitch:%.2f fire:%d",
       fix_control_send.vx,
       fix_control_send.vy,
@@ -135,9 +110,14 @@ void BaseController::speed2odom(){
     speed.current_time = get_clock()->now();  //新时间
 
     //update speed and time stamp
-    speed.vx = chassis_receive.vx;
-    speed.vy = chassis_receive.vy;
-    speed.vz = chassis_receive.vz;
+    ChassisSpeed chassis_snapshot;
+    {
+      std::lock_guard<std::mutex> lock(receive_data_mutex);
+      chassis_snapshot = chassis_receive;
+    }
+    speed.vx = chassis_snapshot.vx;
+    speed.vy = chassis_snapshot.vy;
+    speed.vz = chassis_snapshot.vz;
 
     //compute odometry
     float dt =  speed.current_time.seconds()-speed.last_time.seconds();//time distance
@@ -200,27 +180,38 @@ void BaseController::speed2odom(){
 void BaseController::serial2global(){
     static unsigned long long current_time;
     current_time = rclcpp::Time().nanoseconds();
+    HeartBeatSend heartbeat_snapshot;
+    SentryState sentry_snapshot;
+    AdditionalData additional_snapshot;
+    ext_game_status_t game_status_snapshot;
+    {
+      std::lock_guard<std::mutex> lock(receive_data_mutex);
+      heartbeat_snapshot = heartbeat_receive;
+      sentry_snapshot = sentry_state_receive;
+      additional_snapshot = additional_data;
+      game_status_snapshot = game_status_data;
+    }
     //RCLCPP_INFO(this->get_logger(),"publish gobal information");
     def_msg::msg::GobalInformation status{};  
     //timestamp
 
     //heartbeat
-    if((current_time - heartbeat_receive.timestamp)*10/CLOCKS_PER_SEC > TIMESTAMP_ASSERT_DELAY){
+    if((current_time - heartbeat_snapshot.timestamp)*10/CLOCKS_PER_SEC > TIMESTAMP_ASSERT_DELAY){
       RCLCPP_WARN(this->get_logger(),"--下位机心跳数据超时，断连警告--");
     }
-    status.battery = sentry_state_receive.battery;
-    status.life_extra = sentry_state_receive.life;
-    status.color = sentry_state_receive.color;
-    status.bullet_extra = sentry_state_receive.bullet;
-    status.fault_flag = sentry_state_receive.fault_flag;
+    status.battery = sentry_snapshot.battery;
+    status.life_extra = sentry_snapshot.life;
+    status.color = sentry_snapshot.color;
+    status.bullet_extra = sentry_snapshot.bullet;
+    status.fault_flag = sentry_snapshot.fault_flag;
 
     //additional
-    status.launch = additional_data.launch; //if_launch
-    status.arm = additional_data.arm;
+    status.launch = additional_snapshot.launch; //if_launch
+    status.arm = additional_snapshot.arm;
 
     //game_data
-    status.stage_remain_time = game_status_data.stage_remain_time;
-    status.game_progress = game_status_data.game_progress;
+    status.stage_remain_time = game_status_snapshot.stage_remain_time;
+    status.game_progress = game_status_snapshot.game_progress;
     gobal_information_pub->publish(status);
 
     // =========================================================================
@@ -230,7 +221,7 @@ void BaseController::serial2global(){
     // 1. 发布 GameStatus
     pb_rm_interfaces::msg::GameStatus game_msg;
     // 当 flag = 1 时，game_progress 填 4 (RUNNING)，其他情况填 0 (NOT_START)
-    if (sentry_state_receive.fault_flag == 1) {
+    if (sentry_snapshot.fault_flag == 1) {
         game_msg.game_progress = 4;
     } else {
         game_msg.game_progress = 0;
@@ -241,7 +232,7 @@ void BaseController::serial2global(){
     // 2. 发布 RobotStatus
     pb_rm_interfaces::msg::RobotStatus robot_msg;
     // 动态提取血量
-    robot_msg.current_hp = sentry_state_receive.life;
+    robot_msg.current_hp = sentry_snapshot.life;
     
     // 其余数据按照你的要求严格写死
     robot_msg.robot_id = 1;
@@ -280,8 +271,13 @@ void BaseController::serial2gimble(){
   def_msg::msg::GimbleControl gimble_recv{};
   gimble_recv.header.stamp = current_time;
   gimble_recv.header.frame_id = "gimbal_link"; 
-  gimble_recv.yaw = gimbal_receive.yaw;
-  gimble_recv.pitch = gimbal_receive.pitch;
+  Gimbal gimbal_snapshot;
+  {
+    std::lock_guard<std::mutex> lock(receive_data_mutex);
+    gimbal_snapshot = gimbal_receive;
+  }
+  gimble_recv.yaw = gimbal_snapshot.yaw;
+  gimble_recv.pitch = gimbal_snapshot.pitch;
   //gimble_recv.roll = gimbal_receive.roll;
   gimble_pub->publish(gimble_recv);
   // RCLCPP_INFO(get_logger(),"serial gimble pose data received and pub");
@@ -331,12 +327,17 @@ void BaseController::serial2imu(){
     sensor_msgs::msg::Imu imu{};
     imu.header.stamp = this->get_clock()->now();
     imu.header.frame_id = "base_footprint";
-    imu.angular_velocity.x = imu2_data.vx;
-    imu.angular_velocity.y = imu2_data.vy;
-    imu.angular_velocity.z = imu2_data.vz;
-    imu.linear_acceleration.x = imu2_data.ax;
-    imu.linear_acceleration.y = imu2_data.ay;
-    imu.linear_acceleration.z = imu2_data.az;
+    ImuData imu_snapshot;
+    {
+      std::lock_guard<std::mutex> lock(receive_data_mutex);
+      imu_snapshot = imu2_data;
+    }
+    imu.angular_velocity.x = imu_snapshot.vx;
+    imu.angular_velocity.y = imu_snapshot.vy;
+    imu.angular_velocity.z = imu_snapshot.vz;
+    imu.linear_acceleration.x = imu_snapshot.ax;
+    imu.linear_acceleration.y = imu_snapshot.ay;
+    imu.linear_acceleration.z = imu_snapshot.az;
     imu2_pub->publish(imu);
 }
 
@@ -345,7 +346,10 @@ void BaseController::serial2imu(){
 void BaseController::serial2joint(){
   static float temp_yaw = 0,last_yaw = 0;
   static int rount = 0;
-  temp_yaw = yaw_data.yaw;
+  {
+    std::lock_guard<std::mutex> lock(receive_data_mutex);
+    temp_yaw = yaw_data.yaw;
+  }
   if(temp_yaw < 0){
     temp_yaw  = 360.0-temp_yaw;
   }
@@ -394,4 +398,3 @@ int main(int argc, char* argv[]) {
 	rclcpp::shutdown();
 	return 0;
 }
-

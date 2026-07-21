@@ -1,6 +1,6 @@
 # COD RM2026 导航系统 — 操作指南
 
-> 适用于真机部署和 Gazebo 仿真。最后更新: 2026-07-06
+> 适用于真机部署和 Gazebo 仿真。最后更新: 2026-07-21
 
 ## 目录
 
@@ -137,8 +137,8 @@ ros2 launch livox_ros_driver2 msg_MID360_launch.py
 ls /dev/ttyACM0
 sudo usermod -a -G dialout $USER  # 首次配置需重启
 
-# 3. 雷达 TF 必须已发布 (livox_frame -> base_link)
-# 可在雷达驱动中配置或单独发布静态 TF
+# 3. 导航 launch 会发布 base_link -> livox_frame 静态 TF
+# 光心高度 0.46m，pitch +0.7854rad；不要再启动第二个同名 TF
 ```
 
 ### 2.2 单点导航 (定位模式，预建地图)
@@ -152,7 +152,7 @@ source install/setup.bash
 ros2 launch cod_bringup singlenav_launch.py
 ```
 
-启动的节点: cpp_lidar_filter, small_point_lio, fake_vel_transform, serial_def_sdk/uart, realsense, Nav2(定位模式), RViz
+启动的节点: cpp_lidar_filter, small_point_lio, fake_vel_transform, serial_def_sdk/uart, map_server, Nav2, Collision Monitor, LiDAR 命令看门狗, RViz。真机未安装 RealSense，不启动相机节点。
 
 关键文件: `src/cod_bringup/params/singlenav2_params.yaml`, `src/cod_bringup/maps/rmul2026.yaml`
 
@@ -164,7 +164,7 @@ ros2 launch cod_bringup singlenav_launch.py
 ros2 launch cod_bringup multiplenav_launch.py
 ```
 
-额外节点: pointcloud_to_laserscan (/livox/lidar -> /scan), slam_toolbox, auto_save_map
+额外节点: pointcloud_to_laserscan (`/livox/lidar_filtered` -> `/scan`), slam_toolbox, auto_save_map
 
 关键文件: `src/cod_bringup/params/multiplenav2_params.yaml`, `src/cod_bringup/params/mapper_params_online_async.yaml`
 
@@ -176,8 +176,8 @@ ros2 launch cod_bringup multiplenav_launch.py
 | 地图来源 | 预建 .pgm 地图 | slam_toolbox 实时建图 |
 | Nav2 参数 | `singlenav2_params.yaml` | `multiplenav2_params.yaml` |
 | 需要 /scan | 否 | 是 |
-| robot_base_frame | base_link_fake | base_link_fake |
-| 定位方式 | AMCL + 预建地图 | SLAM 同时定位 |
+| robot_base_frame | base_link | base_link |
+| 地图对齐 | 固定 map->odom，无 AMCL | 固定 map->odom；slam_toolbox 不发布校正 TF |
 | 雷达→串口 | 真机全链路 | 真机全链路 |
 
 ---
@@ -206,7 +206,7 @@ ros2 launch cod_gazebo_simulator gazebo_slam.launch.py world:=rmul_2025 auto_sav
 
 数据流: `Gazebo LiDAR -> /livox/lidar -> pointcloud_to_laserscan -> /scan -> slam_toolbox -> /map`
 
-真机vs仿真差异: 里程计来自 Gazebo DiffDrive (而非 LIO), cmd_vel 通过 ros_gz_bridge 直接发给 Gazebo (而非串口)
+真机vs仿真差异: 里程计来自 Gazebo MecanumDrive (而非 LIO), 安全门控后的 cmd_vel 通过 ros_gz_bridge 直接发给 Gazebo (而非串口)
 
 ### 3.3 定位仿真 (预建地图 + 导航)
 
@@ -237,7 +237,7 @@ ros2 launch cod_gazebo_simulator sim_standalone.launch.py
 必须保持的 link/joint 名称 (外部代码依赖):
 - base_link (Nav2 robot_base_frame)
 - livox_frame + livox_frame_joint (雷达安装位)
-- front_left_wheel_joint / front_right_wheel_joint / rear_left_wheel_joint / rear_right_wheel_joint (DiffDrive)
+- front_left_wheel_joint / front_right_wheel_joint / rear_left_wheel_joint / rear_right_wheel_joint (MecanumDrive)
 - front_mid360_lidar / front_mid360_imu (传感器, bridge 依赖)
 
 可自由修改: 底盘尺寸/质量/惯量, 轮子半径间距, 外观颜色/mesh, 额外传感器
@@ -316,8 +316,7 @@ echo "Done"
 | --- | --- | --- |
 | approach_distance | 2.5m | 距目标多远开始限速 |
 | approach_velocity | 0.2 m/s | 接近速度上限 |
-| direct_approach_distance | 2.0m | P控制驱动距离 |
-| direct_approach_kp | 3.0 | P增益 |
+| approach_kp | 3.0 | 距离相关速度上限增益；不改变 MPPI 已避障的方向 |
 | xy_goal_tolerance | 0.2m | 到达判定半径 |
 
 ### 5.3 代价地图
@@ -330,6 +329,9 @@ echo "Done"
 | local_width/height | 10x10 | 10x10 | 局部代价地图尺寸 |
 | inflation_radius | 0.55 | 0.75 | 膨胀半径 (m) |
 | update_frequency | 5.0 Hz | 5.0 Hz | 更新频率 |
+| min_obstacle_height | 0.05m | 0.05m | 为最低离地 0.10m 障碍保留 0.05m 地面/噪声裕量 |
+
+雷达光心离地 `0.46m`、前倾 `+0.7854rad`。`base_link` 的 z=0 按地面基准使用；修改底盘坐标定义或安装位后必须重新标定 TF 和高度门限。
 
 ### 5.4 速度平滑器
 
@@ -355,6 +357,7 @@ echo "Done"
 | minimum_travel_distance | 1.0m | 最小移动后更新 |
 | do_loop_closing | true | 回环检测 |
 | map_update_interval | 1.0s | 地图更新间隔 |
+| transform_publish_period | 0.0s | 不发布 map->odom 校正 TF（短程运行的已接受限制） |
 
 ### 5.6 fake_vel_transform (坐标变换)
 
@@ -365,11 +368,21 @@ echo "Done"
 | robot_base_frame | base_link | 真实机体帧 |
 | fake_robot_base_frame | base_link_fake | 航向归零虚拟帧 |
 | odom_topic | Odometry | 里程计来源 |
-| input_cmd_vel_topic | cmd_vel | 输入(map系速度) |
-| output_cmd_vel_topic | aft_cmd_vel | 输出(机体系速度) |
+| input_cmd_vel_topic | cmd_vel | 输入(通过碰撞与雷达新鲜度门控的速度) |
+| output_cmd_vel_topic | aft_cmd_vel | 输出到底盘串口的速度 |
 | spin_speed | 0.0 | 小陀螺速度 (rad/s) |
 
-### 5.7 串口 (serial_def_sdk)
+默认 `enable_vel_rotation=false`，该节点直接透传 Nav2 的 `base_link` 速度并提供 0.5s 命令超时保护；`base_link_fake` 只是可选场地坐标速度模式的辅助帧，不是当前 Nav2 的 `robot_base_frame`。
+
+### 5.7 安全命令链
+
+`controller_server -> /cmd_vel_nav -> velocity_smoother -> /cmd_vel_smoothed -> collision_monitor -> /cmd_vel_collision_safe -> lidar_cmd_watchdog -> /cmd_vel -> fake_vel_transform -> /aft_cmd_vel -> serial`
+
+- Collision Monitor 在 `base_link` 周围使用 0.55m StopZone，点云下限为 0.05m。
+- LiDAR 看门狗启动时速度门默认关闭；`/livox/lidar_filtered` 超过 0.3s 未更新后持续发布零速度。
+- 串口节点从启动起发送安全零包，控制话题超时或串口重连期间也明确发送零指令。
+
+### 5.8 串口 (serial_def_sdk)
 
 文件: `src/serial_def_sdk/launch/serial.launch.py`
 
@@ -380,7 +393,7 @@ echo "Done"
 
 话题重映射: `/hardware/cmd_vel_api` -> `/aft_cmd_vel`
 
-### 5.8 仿真机器人模型
+### 5.9 仿真机器人模型
 
 文件: `src/cod_gazebo_simulator/resource/cod_robot.urdf.xacro`
 
@@ -393,9 +406,11 @@ echo "Done"
 | lidar_hz | 10 Hz | LiDAR 更新频率 |
 | lidar_range | 0.1-40.0 m | LiDAR 测距范围 |
 | imu_hz | 200 Hz | IMU 更新频率 |
-| lidar_z | 0.15 m | 雷达安装高度 |
+| lidar_z | 0.46 m | 雷达光心离地高度 |
+| lidar_pitch | +0.7854 rad | 雷达前倾角 |
+| lidar_vertical_samples | 32 | 垂直视场约 -7° 至 +52° |
 
-### 5.9 仿真桥接
+### 5.10 仿真桥接
 
 文件: `src/cod_gazebo_simulator/config/gz_bridge.yaml`
 
@@ -415,27 +430,27 @@ echo "Done"
 ### 6.1 真机
 
 ```
-map -> odom -> base_link -> base_link_fake (Nav2使用)
+map -> odom -> base_link -> livox_frame (z=0.46m, pitch=+45°)
  |       |         |
-静态TF  LIO动态   +-- livox_frame (雷达)
-(slam时  (100Hz)  +-- camera_link (深度相机)
-覆盖)
+静态TF  LIO动态   +-- base_link_fake (可选辅助帧，Nav2不使用)
 ```
 
 | 变换 | 来源 | 频率 |
 | --- | --- | --- |
-| map->odom | static TF + slam_toolbox覆盖 | ~10Hz(SLAM模式) |
+| map->odom | static_transform_publisher | 静态 |
 | odom->base_link | small_point_lio | ~100Hz |
 | base_link->base_link_fake | fake_vel_transform | 随/Odometry |
-| base_link->livox_frame | 用户提供静态TF | 静态 |
+| base_link->livox_frame | singlenav/multiplenav launch | 静态 |
+
+真机单点模式只启动 `map_server`，不启动 AMCL；多点模式的 `slam_toolbox` 设置 `transform_publish_period: 0.0`。因此两种模式都不会持续校正 LIO 漂移，这是针对短时间、短距离运行明确接受的限制。任务开始前必须确认固定 `map -> odom` 与场地图一致。
 
 ### 6.2 仿真
 
 ```
 map -> odom -> base_link -> livox_frame
  |       |         |
-SLAM   Gazebo    +-- 4个轮子
-或静态  DiffDrive
+SLAM/  Gazebo    +-- 4个麦克纳姆轮
+AMCL   MecanumDrive
 ```
 
 ---
@@ -447,6 +462,7 @@ SLAM   Gazebo    +-- 4个轮子
 ```bash
 ros2 topic list
 ros2 topic hz /Odometry
+ros2 topic hz /livox/lidar_filtered
 ros2 topic echo /cmd_vel --once
 ros2 topic bw /livox/lidar
 ```
@@ -492,6 +508,8 @@ ros2 topic pub /cmd_vel geometry_msgs/Twist "{linear: {x: 0.5}}" -r 10
 | 串口无数据 | 权限不足 | dialout 组 + 重启 |
 | Nav2 不规划 | costmap 无数据 | 检查 /livox/lidar_filtered |
 | slam_toolbox 无地图 | /scan 未生成 | 检查 pointcloud_to_laserscan |
+| 机器人始终零速 | LiDAR 看门狗未开门或 Collision Monitor 停车 | 检查 `/livox/lidar_filtered` 新鲜度、`/cmd_vel_collision_safe` 和 StopZone |
+| 运动中雷达掉线 | 网络/驱动故障 | 看门狗应在约 0.3s + 一个控制周期内持续输出零速；未停车则禁止继续运行 |
 | CRC 校验失败 | MCU 固件未更新 | 编译时定义 NO_CRC_MODE |
 
 ### 仿真
@@ -516,6 +534,7 @@ ros2 topic pub /cmd_vel geometry_msgs/Twist "{linear: {x: 0.5}}" -r 10
 | 串口设备 | launch/serial.launch.py | serial_port |
 | 话题超时 | launch/serial.launch.py | topic_timeout_ms |
 | 雷达安装位 | resource/cod_robot.urdf.xacro | livox_frame_joint origin |
+| 最低障碍物门限 | params/*nav2_params.yaml | min_obstacle_height / collision_monitor.livox.min_height |
 | 轮距/轮径 | resource/cod_robot.urdf.xacro | wheel_separation/radius |
 | LiDAR 频率 | resource/cod_robot.urdf.xacro | sensor update_rate |
 | 仿真初始位姿 | launch/gazebo_slam.launch.py | robot_x/y/z/yaw |

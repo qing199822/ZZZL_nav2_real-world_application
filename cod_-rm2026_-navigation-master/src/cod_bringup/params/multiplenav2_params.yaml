@@ -87,9 +87,8 @@ controller_server:
       inner_plugin: "nav2_mppi_controller::MPPIController"
       approach_distance: 2.5  #距目标时开始限速
       approach_velocity: 0.2
-      direct_approach_distance: 2.0  #进入直接驱动模式的距离，绕过MPPI防止画弧
-      direct_approach_kp: 3.0  #直接驱动P控制增益
-      time_steps: 80  #增加到80，预测时域4.8s，让MPPI能看到冲过目标的后果
+      approach_kp: 3.0  #仅缩放MPPI速度幅值，不覆盖其避障方向
+      time_steps: 80  # 80 * 0.02 = 1.6s prediction horizon
       model_dt: 0.02  #稍微放大步长，配合time_steps延长预测时域
       batch_size: 1500 #控制器的采样数。
 
@@ -204,7 +203,7 @@ local_costmap:
         voxel_size: 0.05
         track_unknown_space: true
         max_obstacle_height: 2.0
-        mark_threshold: 1
+        mark_threshold: 0
         combination_method: 1
         obstacle_range: 3.0
         origin_z: 0.0
@@ -223,18 +222,12 @@ local_costmap:
           obstacle_range: 8.0
           raytrace_range: 9.0
 
-          min_obstacle_height: 0.15     #default 0, meters
+          min_obstacle_height: 0.05     # 10 cm obstacles with 5 cm ground/noise margin
           max_obstacle_height: 1.0     #defaule 3, meters
-          expected_update_rate: 0.0    #default 0, if not updating at this rate at least, remove from buffer
+          expected_update_rate: 0.3    # seconds; flag the 10 Hz cloud stale after missed frames
           observation_persistence: 0.6 # 保留0.6秒内扫描(~6圈360°)，充分覆盖减少闪烁
           inf_is_valid: false          #default false, for laser scans
           clear_after_reading: false   # 改为false，配合observation_persistence累积多帧，减少闪烁
-          filter: "voxel"              #default passthrough, apply "voxel", "passthrough", or no filter to sensor data, recommended to have at one filter on
-          voxel_min_points: 2          # 至少2个点才标记体素，过滤单点噪点
-          model_type: 1
-          vertical_fov_angle: 2.00      #default 0.7, radians
-          vertical_fov_offset: 0.0
-          horizontal_fov_angle: 6.28
       always_send_full_costmap: False
 
 
@@ -268,7 +261,7 @@ global_costmap:
         voxel_size: 0.05
         track_unknown_space: true
         max_obstacle_height: 2.0
-        mark_threshold: 1
+        mark_threshold: 0
         combination_method: 1
         obstacle_range: 3.0
         origin_z: 0.0
@@ -287,18 +280,12 @@ global_costmap:
           obstacle_range: 8.0
           raytrace_range: 9.0
 
-          min_obstacle_height: 0.15     #default 0, meters
+          min_obstacle_height: 0.05     # 10 cm obstacles with 5 cm ground/noise margin
           max_obstacle_height: 1.0     #defaule 3, meters
-          expected_update_rate: 0.0    #default 0, if not updating at this rate at least, remove from buffer
+          expected_update_rate: 0.3    # seconds; flag the 10 Hz cloud stale after missed frames
           observation_persistence: 0.6 # 保留0.6秒内扫描(~6圈360°)，充分覆盖减少闪烁
           inf_is_valid: false          #default false, for laser scans
           clear_after_reading: false   # 改为false，配合observation_persistence累积多帧，减少闪烁
-          filter: "voxel"              #default passthrough, apply "voxel", "passthrough", or no filter to sensor data, recommended to have at one filter on
-          voxel_min_points: 2          # 至少2个点才标记体素，过滤单点噪点
-          model_type: 1
-          vertical_fov_angle: 2.00      #default 0.7, radians
-          vertical_fov_offset: 0.0
-          horizontal_fov_angle: 6.28
       always_send_full_costmap: False
 
 map_server:
@@ -430,3 +417,40 @@ velocity_smoother:
     max_decel: [-3.5, -3.5, -3.0] #与 MPPI 制动一致
     odom_topic: "Odometry"
     odom_duration: 0.1
+
+collision_monitor:
+  ros__parameters:
+    use_sim_time: False
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "cmd_vel_smoothed"
+    cmd_vel_out_topic: "cmd_vel_collision_safe"
+    transform_tolerance: 0.1
+    source_timeout: 0.3
+    base_shift_correction: True
+    stop_pub_timeout: 2.0
+    polygons: ["StopZone"]
+    StopZone:
+      type: "polygon"
+      points: [0.55, 0.55, 0.55, -0.55, -0.55, -0.55, -0.55, 0.55]
+      action_type: "stop"
+      max_points: 1
+      visualize: True
+      polygon_pub_topic: "collision_monitor/stop_zone"
+      enabled: True
+    observation_sources: ["livox"]
+    livox:
+      type: "pointcloud"
+      topic: "/livox/lidar_filtered"
+      min_height: 0.05
+      max_height: 1.0
+      enabled: True
+
+lidar_cmd_watchdog:
+  ros__parameters:
+    use_sim_time: False
+    cloud_topic: "/livox/lidar_filtered"
+    cmd_vel_in_topic: "cmd_vel_collision_safe"
+    cmd_vel_out_topic: "cmd_vel"
+    cloud_timeout: 0.3
+    check_rate: 20.0

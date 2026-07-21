@@ -2,7 +2,8 @@
 // Nav2 controller wrapper: limits velocity when approaching goal to prevent overshooting.
 // Principle: transparent proxy wrapping inner controller (e.g. MPPI),
 //            clamps resultant speed below approach_velocity when within approach_distance.
-//            In direct-approach zone, takes over with direct heading drive but keeps collision checks.
+//            It never replaces the direction selected and collision-checked
+//            by the inner controller.
 
 #include <cmath>
 #include <memory>
@@ -48,18 +49,14 @@ public:
       node, name + ".approach_velocity",
       rclcpp::ParameterValue(0.5));
     nav2_util::declare_parameter_if_not_declared(
-      node, name + ".direct_approach_distance",
-      rclcpp::ParameterValue(0.5));
-    nav2_util::declare_parameter_if_not_declared(
-      node, name + ".direct_approach_kp",
+      node, name + ".approach_kp",
       rclcpp::ParameterValue(1.0));
 
     std::string inner_plugin_type;
     node->get_parameter(name + ".inner_plugin", inner_plugin_type);
     node->get_parameter(name + ".approach_distance", approach_distance_);
     node->get_parameter(name + ".approach_velocity", approach_velocity_);
-    node->get_parameter(name + ".direct_approach_distance", direct_approach_distance_);
-    node->get_parameter(name + ".direct_approach_kp", direct_approach_kp_);
+    node->get_parameter(name + ".approach_kp", approach_kp_);
 
     // Load inner controller via pluginlib
     loader_ = std::make_unique<pluginlib::ClassLoader<nav2_core::Controller>>(
@@ -70,9 +67,8 @@ public:
     RCLCPP_INFO(
       logger_,
       "GoalApproachController: wrapping [%s], approach_distance=%.2f m, "
-      "approach_velocity=%.2f m/s, direct_approach_distance=%.2f m, direct_approach_kp=%.2f",
-      inner_plugin_type.c_str(), approach_distance_, approach_velocity_,
-      direct_approach_distance_, direct_approach_kp_);
+      "approach_velocity=%.2f m/s, approach_kp=%.2f",
+      inner_plugin_type.c_str(), approach_distance_, approach_velocity_, approach_kp_);
   }
 
   void cleanup() override
@@ -108,15 +104,12 @@ public:
     // Transform goal to robot base frame for consistent distance calculation
     geometry_msgs::msg::PoseStamped goal_in_base;
     double dist = std::numeric_limits<double>::max();
-    double dx = 0.0, dy = 0.0;
-
     if (tf_ && !goal_.header.frame_id.empty()) {
       try {
         goal_in_base = tf_->transform(
           goal_, costmap_ros_->getBaseFrameID(), tf2::durationFromSec(0.1));
-        dx = goal_in_base.pose.position.x;
-        dy = goal_in_base.pose.position.y;
-        dist = std::hypot(dx, dy);
+        dist = std::hypot(
+          goal_in_base.pose.position.x, goal_in_base.pose.position.y);
       } catch (const tf2::TransformException & ex) {
         // TF failure: skip approach logic, return inner controller output unchanged
         RCLCPP_WARN_THROTTLE(logger_, *clock_, 1000,
@@ -132,29 +125,14 @@ public:
       return cmd;
     }
 
-    if (dist < direct_approach_distance_) {
-      // Direct drive mode: bypass MPPI arc output, drive straight to goal
-      // BUT retain collision checking
-      double target_speed = std::min(approach_velocity_, dist * direct_approach_kp_);
-
-      if (dist > 0.01) {
-        cmd.twist.linear.x = target_speed * (dx / dist);
-        cmd.twist.linear.y = target_speed * (dy / dist);
-      } else {
-        cmd.twist.linear.x = 0.0;
-        cmd.twist.linear.y = 0.0;
-      }
-      // Keep internal controller's angular.z for orientation alignment
-      // (don't force to 0.0 - goal checker may require final yaw)
-    } else if (dist < approach_distance_) {
-      // Speed limiting mode: upper-bound only (don't amplify slow speeds)
+    if (dist < approach_distance_) {
+      // Limit only the magnitude. The MPPI-selected direction remains unchanged.
+      const double allowed_speed = std::min(approach_velocity_, dist * approach_kp_);
       double speed = std::hypot(cmd.twist.linear.x, cmd.twist.linear.y);
-      if (speed > approach_velocity_) {
-        double scale = approach_velocity_ / speed;
+      if (speed > allowed_speed && speed > 0.0) {
+        double scale = allowed_speed / speed;
         cmd.twist.linear.x *= scale;
         cmd.twist.linear.y *= scale;
-        // Scale angular proportionally to avoid spinning-in-place
-        cmd.twist.angular.z *= scale;
       }
     }
 
@@ -185,8 +163,7 @@ private:
   geometry_msgs::msg::PoseStamped goal_;
   double approach_distance_{1.5};
   double approach_velocity_{0.5};
-  double direct_approach_distance_{0.5};
-  double direct_approach_kp_{1.0};
+  double approach_kp_{1.0};
 };
 
 }  // namespace goal_approach_controller

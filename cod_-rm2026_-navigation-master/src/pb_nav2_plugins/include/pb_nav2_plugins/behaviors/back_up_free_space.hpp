@@ -17,6 +17,7 @@
 #define PB_NAV2_PLUGINS__BEHAVIORS__BACK_UP_FREE_SPACE_HPP_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -79,7 +80,7 @@ protected:
   std::vector<geometry_msgs::msg::Point> gatherFreePoints(
     const nav2_msgs::msg::Costmap & costmap, geometry_msgs::msg::Pose2D pose, float radius);
 
-  float findBestDirection(
+  std::optional<float> findBestDirection(
     const nav2_msgs::msg::Costmap & costmap, geometry_msgs::msg::Pose2D pose, float start_angle,
     float end_angle, float radius, float angle_increment);
 

@@ -135,8 +135,8 @@ ign gazebo --version
 | `pb_omni_pid_pursuit_controller` | 全向 PID 追踪控制器 |
 | `pb_rm_interfaces` | 比赛接口定义 |
 | `pointcloud_to_laserscan` | 3D 点云→2D 激光 |
-| `ros2_simple_serial` | 旧串口模块 (已废弃, 未在 launch 中引用) |
 | `serial_def_sdk` | 新 Seasky 串口通信 (核心) |
+| `slam_dynamic_filter` | SLAM 动态障碍过滤 |
 | `small_point_lio` | 激光惯性里程计 (LIO) |
 | `vision_msg` | 视觉消息定义 |
 | `waypoint_editor` | 航点编辑器 |

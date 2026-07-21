@@ -25,6 +25,7 @@
 #include <atomic>
 #include "uart_hd.h"
 #include "DataType.h"
+#include "ReceiveDataMutex.hpp"
 #include "uart.h"
 #include "pb_rm_interfaces/msg/game_status.hpp"
 #include "pb_rm_interfaces/msg/robot_status.hpp"
@@ -62,11 +63,6 @@ private:
     rclcpp::Time last_gimbal_time_;
     rclcpp::Time last_spin_time_;
   // R3修复: 已移除未使用的 DATA_TIMEOUT_MS, 改用可配置参数 topic_timeout_ms_
-    // M2修复: 成员变量替代静态变量的声明
-    bool has_ever_received_ = false;
-    rclcpp::Time init_cmd_time_;
-    rclcpp::Time init_gimbal_time_;
-    rclcpp::Time init_spin_time_;
     // M5: 话题超时参数(ms), launch 文件可配置
     int topic_timeout_ms_ = 100; 
 
@@ -98,7 +94,11 @@ public:
         /*获取参数*/
         this->declare_parameter("serial_port","/dev/ttyUSB0");
         this->get_parameter_or<std::string>("serial_port", uart_port, "/dev/ttyUSB0");
-        uart->setUartName(uart_port);
+        if (!uart->setUartName(uart_port)) {
+            RCLCPP_WARN(
+                this->get_logger(),
+                "串口 %s 初次打开失败，后台重连线程已启动", uart_port.c_str());
+        }
         /***************** sub *****************/
         /*从combine_control获取控制指令*/
         //订阅底盘控制命令
@@ -215,11 +215,6 @@ public:
         last_cmd_time_ = this->get_clock()->now();
         last_gimbal_time_ = this->get_clock()->now();
         last_spin_time_ = this->get_clock()->now();
-
-        has_ever_received_ = false;
-        init_cmd_time_ = last_cmd_time_;
-        init_gimbal_time_ = last_gimbal_time_;
-        init_spin_time_ = last_spin_time_;
 
         // C4修复: 不再手动启动线程, SerialDriver::readLoop 已处理
         // (C4修复: 移除重复线程 — SerialDriver::readLoop 已处理接收)

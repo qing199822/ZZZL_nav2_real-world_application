@@ -148,6 +148,8 @@ void OmniPidPursuitController::configure(
   node->get_parameter(plugin_name_ + ".v_linear_min", v_linear_min_);
   node->get_parameter(plugin_name_ + ".v_angular_max", v_angular_max_);
   node->get_parameter(plugin_name_ + ".v_angular_min", v_angular_min_);
+  configured_linear_speed_limit_ = std::max(std::abs(v_linear_min_), std::abs(v_linear_max_));
+  linear_speed_limit_ = configured_linear_speed_limit_;
   node->get_parameter(plugin_name_ + ".max_robot_pose_search_dist", max_robot_pose_search_dist_);
   node->get_parameter(plugin_name_ + ".curvature_min", curvature_min_);
   node->get_parameter(plugin_name_ + ".curvature_max", curvature_max_);
@@ -253,6 +255,7 @@ geometry_msgs::msg::TwistStamped OmniPidPursuitController::computeVelocityComman
   applyCurvatureLimitation(transformed_plan, carrot_pose, lin_vel);
 
   applyApproachVelocityScaling(transformed_plan, lin_vel);
+  lin_vel = std::clamp(lin_vel, -linear_speed_limit_, linear_speed_limit_);
 
   // Transform local frame to global frame to use in collision checking
   nav_msgs::msg::Path costmap_frame_local_plan;
@@ -265,7 +268,11 @@ geometry_msgs::msg::TwistStamped OmniPidPursuitController::computeVelocityComman
   for (int i = 0; i < sample_points; ++i) {
     int index = std::min((i * plan_size) / std::max(sample_points, 1), plan_size - 1);
     geometry_msgs::msg::PoseStamped map_pose;
-    transformPose(costmap_ros_->getGlobalFrameID(), transformed_plan.poses[index], map_pose);
+    if (!transformPose(
+        costmap_ros_->getGlobalFrameID(), transformed_plan.poses[index], map_pose))
+    {
+      throw std::runtime_error("Unable to transform sampled path pose into costmap frame");
+    }
     costmap_frame_local_plan.poses.push_back(map_pose);
   }
 
@@ -294,9 +301,18 @@ geometry_msgs::msg::TwistStamped OmniPidPursuitController::computeVelocityComman
 void OmniPidPursuitController::setPlan(const nav_msgs::msg::Path & path) { global_plan_ = path; }
 
 void OmniPidPursuitController::setSpeedLimit(
-  const double & /*speed_limit*/, const bool & /*percentage*/)
+  const double & speed_limit, const bool & percentage)
 {
-  RCLCPP_WARN(logger_, "Speed limit is not implemented in this controller.");
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (speed_limit <= 0.0) {
+    linear_speed_limit_ = configured_linear_speed_limit_;
+  } else if (percentage) {
+    linear_speed_limit_ = configured_linear_speed_limit_ * std::clamp(speed_limit, 0.0, 100.0) /
+      100.0;
+  } else {
+    linear_speed_limit_ = std::min(speed_limit, configured_linear_speed_limit_);
+  }
+  RCLCPP_INFO(logger_, "Linear speed limit set to %.3f m/s", linear_speed_limit_);
 }
 
 nav_msgs::msg::Path OmniPidPursuitController::transformGlobalPlan(
@@ -338,7 +354,9 @@ nav_msgs::msg::Path OmniPidPursuitController::transformGlobalPlan(
     stamped_pose.header.frame_id = global_plan_.header.frame_id;
     stamped_pose.header.stamp = robot_pose.header.stamp;
     stamped_pose.pose = global_plan_pose.pose;
-    transformPose(costmap_ros_->getBaseFrameID(), stamped_pose, transformed_pose);
+    if (!transformPose(costmap_ros_->getBaseFrameID(), stamped_pose, transformed_pose)) {
+      throw std::runtime_error("Unable to transform global plan pose into robot base frame");
+    }
     transformed_pose.pose.position.z = 0.0;
     return transformed_pose;
   };

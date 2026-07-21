@@ -19,6 +19,9 @@
   <depend>ros_gz_sim</depend>
   <depend>joint_state_publisher</depend>
   <depend>xacro</depend>
+  <exec_depend>cod_bringup</exec_depend>
+  <exec_depend>cpp_lidar_filter</exec_depend>
+  <exec_depend>pointcloud_to_laserscan</exec_depend>
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

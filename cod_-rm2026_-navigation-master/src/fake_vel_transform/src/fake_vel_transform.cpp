@@ -44,9 +44,9 @@ FakeVelTransform::FakeVelTransform(const rclcpp::NodeOptions & options)
   odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
     odom_topic_, 10, std::bind(&FakeVelTransform::odomCallback, this, std::placeholders::_1));
 
-  // Watchdog timer: publish zero velocity if no cmd_vel received within timeout
+  // Check much faster than the timeout so stopping latency is deterministic.
   watchdog_timer_ = this->create_wall_timer(
-    std::chrono::milliseconds(static_cast<int>(cmd_vel_timeout_ * 1000)),
+    std::chrono::milliseconds(50),
     std::bind(&FakeVelTransform::watchdogCallback, this));
 
   last_cmd_time_ = this->now();
@@ -60,10 +60,10 @@ void FakeVelTransform::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg
   t.header.stamp = msg->header.stamp;
   t.header.frame_id = robot_base_frame_;
   t.child_frame_id = fake_robot_base_frame_;
-  // Include full transform (translation + rotation) from odometry
-  t.transform.translation.x = msg->pose.pose.position.x;
-  t.transform.translation.y = msg->pose.pose.position.y;
-  t.transform.translation.z = msg->pose.pose.position.z;
+  // The helper frame shares the base_link origin and only neutralizes yaw.
+  t.transform.translation.x = 0.0;
+  t.transform.translation.y = 0.0;
+  t.transform.translation.z = 0.0;
   tf2::Quaternion q;
   q.setRPY(0, 0, -current_robot_base_angle_);
   t.transform.rotation = tf2::toMsg(q);
@@ -75,13 +75,12 @@ void FakeVelTransform::cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr
 {
   last_cmd_time_ = this->now();
 
-  float angle_diff = current_robot_base_angle_;
-
   geometry_msgs::msg::Twist aft_tf_vel;
   // Transparently pass through angular.z (preserve upstream controller output)
   aft_tf_vel.angular.z = (spin_speed_ != 0.0f) ? spin_speed_ : msg->angular.z;
 
   if (enable_vel_rotation_) {
+    const double angle_diff = current_robot_base_angle_;
     // Field-centric mode: rotate Nav2 world-frame velocity to chassis frame
     aft_tf_vel.linear.x = msg->linear.x * cos(angle_diff) + msg->linear.y * sin(angle_diff);
     aft_tf_vel.linear.y = -msg->linear.x * sin(angle_diff) + msg->linear.y * cos(angle_diff);

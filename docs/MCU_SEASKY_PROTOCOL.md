@@ -443,7 +443,7 @@ void seasky_send_frame(uint16_t msg_id, uint8_t *payload, uint16_t len) {
 
 ---
 
-## 7. 旧协议对照 (ros2_simple_serial，已废弃)
+## 7. 旧协议对照 (ros2_simple_serial，已移除)
 
 > 仅供过渡期参考，新固件请忽略。
 

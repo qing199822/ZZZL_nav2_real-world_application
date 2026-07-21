@@ -289,6 +289,8 @@ private:
   double v_linear_max_;
   double v_angular_min_;
   double v_angular_max_;
+  double configured_linear_speed_limit_;
+  double linear_speed_limit_;
   double min_approach_linear_velocity_;
   double approach_velocity_scaling_dist_;
   double curvature_min_;

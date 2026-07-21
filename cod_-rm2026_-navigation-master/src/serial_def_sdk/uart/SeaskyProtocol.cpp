@@ -1,6 +1,11 @@
 #include "SeaskyProtocol.hpp"
-#include <iostream>
+
 #include <cstring>
+#include <iostream>
+
+#include "ReceiveDataMutex.hpp"
+
+std::mutex receive_data_mutex;
 
 // 引入 CRC 算法
 extern "C" {
@@ -22,17 +27,9 @@ bool SeaskyProtocol::init(const std::string& device_name) {
     // 设置接收回调
     driver_.setReceiverCallback(std::bind(&SeaskyProtocol::onDataReceived, this, std::placeholders::_1, std::placeholders::_2));
     
-    // 打开串口 (阻塞直到成功，模拟原代码逻辑，或者你可以选择立即返回)
-    // 为了兼容原代码的"wait_uart"逻辑，这里我们做一个简单的重试循环
-    int retries = 0;
-    while (!driver_.open(device_name, 115200)) {
-        if (++retries > 5) {
-            std::cerr << "[Protocol] Failed to open UART after retries." << std::endl;
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-    return true;
+    // A failed initial open is non-fatal: SerialDriver keeps retrying in its
+    // background read loop without blocking ROS node startup.
+    return driver_.open(device_name, 115200);
 }
 
 // ======================= 发送逻辑 (Serialize) =======================
@@ -256,9 +253,7 @@ void SeaskyProtocol::dispatchMessage(uint16_t msg_id, const uint8_t* payload, ui
     // 这里我们将解析出的数据直接写回 DataType.c 定义的全局变量中
     // 这样上层的 main.cpp 或其他代码直接读取全局变量即可，保持了 API 兼容性
     
-    // 注意：这里的全局变量写操作理论上应该加锁，但为了完全兼容旧的 C 接口（它们直接读写全局变量），
-    // 我们暂时不加锁，或者假设上层读取频率较低。
-    // 在更严格的设计中，应该提供 Get 函数并返回副本。
+    std::lock_guard<std::mutex> data_lock(receive_data_mutex);
     // printf("[ID Sniffer] 👃 Received a valid packet with ID: 0x%04X, Payload Length: %d\n", msg_id, len);
     int pos = 0;
 

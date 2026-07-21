@@ -1,11 +1,11 @@
-# Odometry (from Gazebo DiffDrive plugin → /model/cod_robot/odom)
+# Odometry (from Gazebo MecanumDrive plugin -> /model/cod_robot/odom)
 - ros_topic_name: "/Odometry"
   gz_topic_name: "/model/cod_robot/odom"
   ros_type_name: "nav_msgs/msg/Odometry"
   gz_type_name: "ignition.msgs.Odometry"
   direction: "GZ_TO_ROS"
 
-# cmd_vel (ROS → Gazebo DiffDrive)
+# cmd_vel (ROS -> Gazebo MecanumDrive)
 - ros_topic_name: "/cmd_vel"
   gz_topic_name: "/model/cod_robot/cmd_vel"
   ros_type_name: "geometry_msgs/msg/Twist"
@@ -25,4 +25,3 @@
   ros_type_name: "sensor_msgs/msg/Imu"
   gz_type_name: "ignition.msgs.IMU"
   direction: "GZ_TO_ROS"
-

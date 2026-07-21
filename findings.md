@@ -72,7 +72,7 @@ serial_def_sdk
 
 ## 已知限制
 1. MCU 固件必须同步升级才能解析 Seasky 协议帧
-2. 旧 ros2_simple_serial 包仍在工作空间 (已从 launch 文件移除引用)
+2. 旧 ros2_simple_serial 包已在 `safe` 分支从工作空间移除
 3. 无单元测试覆盖 (零测试基础设施)
 4. speed2odom 功能禁用 — 依赖 small_point_lio 提供里程计
 5. Nav2 无法直接控制角速度 (被 fake_vel_transform 替换为 spin_speed_=0)

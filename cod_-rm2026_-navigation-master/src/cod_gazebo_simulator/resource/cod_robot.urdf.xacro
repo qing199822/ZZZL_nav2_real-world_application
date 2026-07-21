@@ -73,17 +73,19 @@
   <joint name="livox_frame_joint" type="fixed">
     <parent link="base_link"/>
     <child link="livox_frame"/>
-    <origin xyz="0.0 0.0 0.15" rpy="0 0.7854 0"/>   <!-- Pitch +45°: LiDAR前倾 -->
+    <origin xyz="0.0 0.0 0.46" rpy="0 0.7854 0"/>   <!-- Measured height, pitch +45 degrees -->
   </joint>
 
-  <!-- ===== Gazebo 差速驱动插件 (sub cmd_vel → apply wheel velocity) ===== -->
+  <!-- ===== Gazebo mecanum drive plugin ===== -->
   <gazebo>
-    <plugin name="ignition::gazebo::systems::DiffDrive" filename="ignition-gazebo-diff-drive-system">
-      <left_joint>front_left_wheel_joint</left_joint>
-      <left_joint>rear_left_wheel_joint</left_joint>
-      <right_joint>front_right_wheel_joint</right_joint>
-      <right_joint>rear_right_wheel_joint</right_joint>
+    <plugin name="ignition::gazebo::systems::MecanumDrive"
+            filename="ignition-gazebo-mecanum-drive-system">
+      <front_left_joint>front_left_wheel_joint</front_left_joint>
+      <front_right_joint>front_right_wheel_joint</front_right_joint>
+      <back_left_joint>rear_left_wheel_joint</back_left_joint>
+      <back_right_joint>rear_right_wheel_joint</back_right_joint>
       <wheel_separation>0.36</wheel_separation>
+      <wheelbase>0.36</wheelbase>
       <wheel_radius>0.06</wheel_radius>
       <odom_publish_frequency>50</odom_publish_frequency>
       <topic>cmd_vel</topic>
@@ -119,10 +121,10 @@
             <max_angle>3.14159</max_angle>
           </horizontal>
           <vertical>
-            <samples>1</samples>
+            <samples>32</samples>
             <resolution>1</resolution>
-            <min_angle>0</min_angle>
-            <max_angle>0</max_angle>
+            <min_angle>-0.12217</min_angle>
+            <max_angle>0.90757</max_angle>
           </vertical>
         </scan>
         <range>

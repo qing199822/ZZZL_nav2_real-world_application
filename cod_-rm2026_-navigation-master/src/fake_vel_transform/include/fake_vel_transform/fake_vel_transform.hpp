@@ -34,7 +34,7 @@ private:
   std::string output_cmd_vel_topic_;
   float spin_speed_;
 
-  double current_robot_base_angle_;
+  double current_robot_base_angle_{0.0};
   double cmd_vel_timeout_{0.5};
   bool enable_vel_rotation_{true};
   rclcpp::Time last_cmd_time_;

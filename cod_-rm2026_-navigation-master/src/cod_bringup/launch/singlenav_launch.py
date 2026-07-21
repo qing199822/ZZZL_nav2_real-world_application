@@ -1,7 +1,6 @@
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
-from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -15,19 +14,17 @@ def generate_launch_description():
 
     rviz_config_file = os.path.join(bring_up_dir, 'rviz', 'cod_nav.rviz')
 
-    fast_lio_config_file = 'mid360.yaml'
     # 声明启动参数
     declare_use_sim_time = DeclareLaunchArgument(
         'use_sim_time', default_value='false',
         description='Use simulation (Gazebo) clock if true')
-    declare_slam_params_file = DeclareLaunchArgument(
-        'slam_params_file', default_value=os.path.join(bring_up_dir,'params','mapper_params_async.yaml')
-    )
     declare_nav2_params_file = DeclareLaunchArgument(
-        'nav2_params_file',default_value=os.path.join(bring_up_dir,'params','singlenav2_params.yaml')
+        'nav2_params_file',
+        default_value=os.path.join(
+            bring_up_dir, 'params', 'singlenav2_params.yaml'
+        ),
     )
     use_sim_time = LaunchConfiguration('use_sim_time')
-    slam_params_file = LaunchConfiguration('slam_params_file')
     nav2_params_file = LaunchConfiguration('nav2_params_file')
 
     # 定义节点和包含的launch文件
@@ -41,6 +38,8 @@ def generate_launch_description():
                 parameters=[{
                     'input_topic': '/livox/lidar',
                     'output_topic': '/livox/lidar_filtered',
+                    'crop_frame': 'base_link',
+                    'transform_tolerance': 0.1,
                     'min_x': -0.2, 'max_x': 0.2,
                     'min_y': -0.2, 'max_y': 0.4,
                     'min_z': -0.1, 'max_z': 0.2,
@@ -87,8 +86,7 @@ def generate_launch_description():
                     "odom",
                 ],
             ),
-            # M4修复: 添加 livox_frame -> base_link 静态TF
-            # 请根据实际雷达安装位置修改 --x/--y/--z 参数
+            # Measured MID-360 optical origin: 0.46 m above base_link ground plane.
             Node(
                 package="tf2_ros",
                 executable="static_transform_publisher",
@@ -96,7 +94,7 @@ def generate_launch_description():
                 arguments=[
                     "--x", "0.0",
                     "--y", "0.0",
-                    "--z", "0.15",
+                    "--z", "0.46",
                     "--roll", "0.0",
                     "--pitch", "0.7854",  # Pitch +45°: LiDAR前倾
                     "--yaw", "0.0",
@@ -110,7 +108,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[{"use_sim_time": use_sim_time}],
             ),
-            # ========== 替换：RMserial-main 替代 ros2_simple_serial ==========
+            # Seasky serial transport
             Node(
                 package='serial_def_sdk',
                 executable='uart',
@@ -124,9 +122,12 @@ def generate_launch_description():
                     ('/hardware/cmd_vel_api', '/aft_cmd_vel'),
                 ],
             ),
-            # =================================================================
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','localization_launch.py')),
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        bring_up_dir, 'launch', 'localization_launch.py'
+                    )
+                ),
                 launch_arguments={
                                   'use_sim_time': "false",
                                   'autostart': "true",
@@ -136,7 +137,11 @@ def generate_launch_description():
                                   'container_name': 'nav2_container'}.items()
             ),
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','navigation_launch.py')),
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        bring_up_dir, 'launch', 'navigation_launch.py'
+                    )
+                ),
                 launch_arguments={
                                   'use_sim_time': "false",
                                   'autostart': "true",
@@ -148,7 +153,7 @@ def generate_launch_description():
             Node(
                 package='rviz2',
                 executable='rviz2',
-                arguments=['-d',rviz_config_file],
+                arguments=['-d', rviz_config_file],
                 output='screen',
             ),
         ]
@@ -156,7 +161,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         declare_use_sim_time,
-        declare_slam_params_file,
         declare_nav2_params_file,
         load_nodes
     ])

@@ -33,10 +33,10 @@ bool SerialDriver::open(const std::string& device, int baudrate) {
         std::cout << "[SerialDriver] Port " << device << " opened successfully." << std::endl;
     }
 
-    // 如果线程还没跑，就启动它（确保只启动一次）
-    // H1修复: 仅在成功打开时才启动读线程
+    // The read loop also owns reconnect attempts, so it must start even when
+    // the device is absent during initial startup.
     bool open_ok = (new_fd != -1);
-    if (open_ok && !is_running_) {
+    if (!is_running_) {
         is_running_ = true;
         read_thread_ = std::thread(&SerialDriver::readLoop, this);
     }

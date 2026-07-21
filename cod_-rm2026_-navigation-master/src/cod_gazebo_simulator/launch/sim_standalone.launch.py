@@ -4,7 +4,7 @@ COD RM2026 Gazebo 独立仿真 (修复版)
 仅启动 Gazebo + 机器人 + 传感器桥接 + RViz。不启动 Nav2。
 
 C1+M6修复: xacro→URDF, robot_description传参
-C2修复:   添加 livox_frame 静态TF
+C2修复:   livox_frame TF由robot_state_publisher唯一发布
 
 使用:
   ros2 launch cod_gazebo_simulator sim_standalone.launch.py
@@ -52,23 +52,23 @@ def generate_launch_description():
              parameters=[{"use_sim_time": True, "robot_description": robot_desc}]),
     ])
 
-    livox_tf = Node(
-        package="tf2_ros", executable="static_transform_publisher",
-        arguments=["--x", "0.0", "--y", "0.0", "--z", "0.15",
-                   "--roll", "0.0", "--pitch", "0.7854", "--yaw", "0.0",   # Pitch +45°: LiDAR前倾
-                   "--frame-id", "base_link", "--child-frame-id", "livox_frame"],
-    )
-
     bridge_cfg = os.path.join(pkg_sim, "config", "gz_bridge.yaml")
     gz_bridge = TimerAction(period=6.0, actions=[
         Node(package="ros_gz_bridge", executable="parameter_bridge",
              parameters=[{"config_file": bridge_cfg}]),
     ])
 
-    pcl2scan = TimerAction(period=7.0, actions=[
+    lidar_filter = TimerAction(period=7.0, actions=[
+        Node(package="cpp_lidar_filter", executable="lidar_filter_node",
+             parameters=[{"use_sim_time": True, "crop_frame": "base_link",
+                          "input_topic": "/livox/lidar",
+                          "output_topic": "/livox/lidar_filtered"}]),
+    ])
+
+    pcl2scan = TimerAction(period=8.0, actions=[
         Node(package="pointcloud_to_laserscan", executable="pointcloud_to_laserscan_node",
-             remappings=[("cloud_in", "/livox/lidar"), ("scan", "/scan")],
-             parameters=[{"target_frame": "base_link", "min_height": -0.3,
+             remappings=[("cloud_in", "/livox/lidar_filtered"), ("scan", "/scan")],
+             parameters=[{"target_frame": "base_link", "min_height": 0.05,
                          "max_height": 1.0, "range_min": 0.3, "range_max": 40.0,
                          "use_inf": True, "use_sim_time": True}]),
     ])
@@ -85,8 +85,8 @@ def generate_launch_description():
     ld.add_action(clock_bridge)
     ld.add_action(spawn)
     ld.add_action(rsp)
-    ld.add_action(livox_tf)
     ld.add_action(gz_bridge)
+    ld.add_action(lidar_filter)
     ld.add_action(pcl2scan)
     ld.add_action(rviz)
     return ld
